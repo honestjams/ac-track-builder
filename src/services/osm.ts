@@ -4,6 +4,7 @@
 
 import type { LngLat } from "../core/geo";
 import type { OsmFeatures } from "../core/track";
+import type { RoundaboutHint } from "../core/roundabout";
 
 const OSRM = "https://router.project-osrm.org";
 const PHOTON = "https://photon.komoot.io/api/";
@@ -17,17 +18,28 @@ const OVERPASS = [
 export interface Route {
   coords: LngLat[];
   distance: number;
+  /** Where the route goes round a roundabout, with the arc it drives. */
+  roundabouts: RoundaboutHint[];
+}
+
+interface OsrmStep {
+  maneuver: { type: string; location: LngLat };
+  geometry: { coordinates: LngLat[] };
 }
 
 /** Driving route through the pins, in order, on the real road network. */
 export async function route(pins: LngLat[], signal?: AbortSignal): Promise<Route> {
   const path = pins.map((p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join(";");
-  const r = await fetch(`${OSRM}/route/v1/driving/${path}?overview=full&geometries=geojson&continue_straight=true`, { signal });
+  const r = await fetch(`${OSRM}/route/v1/driving/${path}?overview=full&geometries=geojson&steps=true&continue_straight=true`, { signal });
   const body = await r.json().catch(() => ({}));
   if (!r.ok || body.code !== "Ok" || !body.routes?.length) {
     throw new Error(body.message || `Routing failed (HTTP ${r.status})`);
   }
-  return { coords: body.routes[0].geometry.coordinates, distance: body.routes[0].distance };
+  const steps: OsrmStep[] = body.routes[0].legs.flatMap((l: { steps: OsrmStep[] }) => l.steps);
+  const roundabouts = steps
+    .filter((st) => /^(roundabout|rotary|roundabout turn)$/.test(st.maneuver.type))
+    .map((st) => ({ location: st.maneuver.location, arc: st.geometry.coordinates }));
+  return { coords: body.routes[0].geometry.coordinates, distance: body.routes[0].distance, roundabouts };
 }
 
 export interface Place {
@@ -120,6 +132,7 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
   const query = `[out:json][timeout:40];(
     way(around:12,${around})[highway];
     way(around:15,${around})[barrier=guard_rail];
+    way(around:30,${around})[junction~"^(roundabout|circular)$"];
   );out tags geom;`;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 45000);
@@ -137,14 +150,16 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     clearTimeout(timer);
     ctl.abort();
   }
-  const features: OsmFeatures = { buildings: [], guardRails: [] };
+  const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [] };
   if (!elements) return { features };
 
   const ways: Way[] = [];
   for (const e of elements) {
     const tags = e.tags ?? {};
     const pts = e.geometry!.map((g) => [g.lon, g.lat] as LngLat);
-    if (tags.barrier === "guard_rail") {
+    if (tags.junction === "roundabout" || tags.junction === "circular") {
+      features.roundaboutRings!.push(pts);
+    } else if (tags.barrier === "guard_rail") {
       features.guardRails.push(pts);
     } else if (tags.highway) {
       const width = wayWidth(tags);

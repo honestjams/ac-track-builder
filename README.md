@@ -20,9 +20,18 @@ everything runs client-side: no server, no account, no queue.
   each side of the road textured with aerial imagery.
 - Low-detail horizon terrain out to 1.5 km so the world doesn't end at the
   roadside.
+- Australian road surfaces: chip seal on rural roads, dense asphalt on major
+  roads and in town, with wheel-path wear, patch repairs and sealed cracks.
+- Line markings as real geometry: white edge lines, and a dividing line that
+  is broken where there's overtaking sight distance and becomes a barrier
+  line on blind bends and crests, plus raised pavement markers.
+- Real roundabouts: the full circulating carriageway, a mountable kerb and a
+  planted island, instead of a hairpin where the route goes round one.
 - Scenery: trees wherever the aerial imagery shows tree canopy, guard rails
   where the ground drops away beside the road (or where OSM maps one), white
-  guide posts, and buildings extruded from OSM footprints.
+  guide posts, and buildings: OSM footprints where mapped, plus placeholder
+  houses wherever the imagery shows a roof, with Colorbond or terracotta
+  roofs in the matching colour.
 - Invisible walls that keep you on the road and pull in where switchbacks
   pass close to each other.
 - Pit boxes, a starting grid, hotlap start, A-to-B start/finish timing (or a
@@ -75,11 +84,14 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/road.ts`, `polyline.ts` | Centreline smoothing, widths, banking, nearest-point index |
 | `src/core/roadMesh.ts` | Road, verge and wall meshes |
 | `src/core/terrain.ts`, `backdrop.ts` | Drivable terrain corridor and horizon scenery |
-| `src/core/scenery.ts` | Trees from imagery, guard rails, guide posts, OSM buildings |
+| `src/core/scenery.ts` | Trees from imagery, guard rails, guide posts |
+| `src/core/buildings.ts` | OSM footprints and roofs detected in imagery, gable roofs |
+| `src/core/markings.ts` | Edge and dividing lines from sight distance, pavement markers |
+| `src/core/roundabout.ts` | Roundabout circles, ring carriageway, island, connectors |
 | `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
 | `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |
 | `src/core/track.ts` | The whole pipeline; network access is injected |
-| `src/services/` | OSRM, Photon/Nominatim, Overpass, tile fetching (browser only) |
+| `src/services/` | OSRM, Photon/Nominatim, Overpass, OpenFreeMap vector tiles, tile fetching (browser only) |
 | `src/ui/` | Map UI and three.js preview |
 
 `src/core` has no DOM or network code, so the whole pipeline runs under
@@ -87,7 +99,8 @@ Node in the tests with synthetic terrain.
 
 ## Data sources and licences
 
-- Roads: © OpenStreetMap contributors, ODbL. Routing by the public
+- Roads and buildings: © OpenStreetMap contributors, ODbL, via Overpass and
+  [OpenFreeMap](https://openfreemap.org) vector tiles. Routing by the public
   [OSRM](https://project-osrm.org) demo server; place search by
   [Photon](https://photon.komoot.io) and Nominatim.
 - Elevation: [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/)

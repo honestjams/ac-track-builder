@@ -5,7 +5,9 @@
 import type { Kn5MeshNode } from "./kn5";
 import { MeshBuilder, type Vec3 } from "./mesh";
 import type { BuildOptions } from "./options";
-import { surfaceHeight, type RoadPlan, type RoadSample, SegmentIndex } from "./road";
+import { inRoundabout, surfaceHeight, type RoadPlan, type RoadSample, SegmentIndex } from "./road";
+import { outerRadius, ringHeight } from "./roundabout";
+import earcut from "earcut";
 import type { HeightFn } from "./elevation";
 
 import { SEAL_LENGTH } from "./textures";
@@ -42,6 +44,8 @@ export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions, materialFor:
   const verge: Kn5MeshNode[] = [];
   // Distance along the road for UVs; loops keep counting past the end.
   const sAt = (i: number) => (i >= n ? plan.length : samples[i].s);
+  // Sections on a roundabout: the ring mesh covers those, so the ribbon stops.
+  const onRing = (i: number) => !!inRoundabout(plan, at(i).pos[0], at(i).pos[1], 0.3);
 
   chunkRanges(plan).forEach(([a, b], ci) => {
     const rb = new MeshBuilder();
@@ -60,6 +64,7 @@ export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions, materialFor:
     for (let r = 0; r < b - a; r++) {
       for (let j = 0; j < cols - 1; j++) {
         const p = r * cols + j;
+        if (onRing(a + r) || onRing(a + r + 1)) continue;
         // back-left, back-right, front-right, front-left
         rb.quad(p, p + 1, p + cols + 1, p + cols);
       }
@@ -85,6 +90,7 @@ export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions, materialFor:
         vb.vertex(point(s, oR, eR - VERGE_DROP - SKIRT_DEPTH), 0, v);
       }
       for (let r = 0; r < b - a; r++) {
+        if (onRing(a + r) || onRing(a + r + 1)) continue;
         const p = r * 6, q = p + 6;
         vb.quad(p, p + 1, q + 1, q);
         vb.quad(p + 1, p + 2, q + 2, q + 1);
@@ -92,6 +98,52 @@ export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions, materialFor:
         vb.quad(p + 4, p + 5, q + 5, q + 4);
       }
       verge.push(vb.toKn5(`1GRASS_VERGE_${pad(ci)}`, "verge"));
+    }
+  });
+
+  // Join the ribbon's last section before each ring to the ring's outer edge.
+  plan.roundabouts.forEach((ring, k) => {
+    const Ro = outerRadius(ring);
+    const last = plan.closed ? n : n - 1;
+    let j = 0;
+    for (let i = 0; i < last; i++) {
+      const a = onRing(i), b = onRing(i + 1);
+      if (a === b) continue;
+      const end = a ? i + 1 : i;
+      const s = at(end);
+      if (Math.hypot(s.pos[0] - ring.c[0], s.pos[1] - ring.c[1]) > Ro + 6) continue; // another ring's
+      const half = s.width / 2;
+      const L = point(s, half, surfaceHeight(s, half, opts.crown)), R = point(s, -half, surfaceHeight(s, -half, opts.crown));
+      const ang = (p: Vec3) => Math.atan2(p[1] - ring.c[1], p[0] - ring.c[0]);
+      const aL = ang(L);
+      let dA = ang(R) - aL;
+      while (dA > Math.PI) dA -= 2 * Math.PI;
+      while (dA < -Math.PI) dA += 2 * Math.PI;
+      const steps = Math.max(2, Math.ceil(Math.abs(dA) * Ro / 1.5));
+      const arc: Vec3[] = [];
+      for (let k2 = 0; k2 <= steps; k2++) {
+        const t = aL + (dA * k2) / steps;
+        arc.push([ring.c[0] + Math.cos(t) * Ro, ring.c[1] + Math.sin(t) * Ro, ringHeight(ring, Ro)]);
+      }
+      // L, the ring edge from L's side round to R's, then R.
+      let poly: Vec3[] = [L, ...arc, R];
+      let area = 0;
+      for (let q = 0; q < poly.length; q++) {
+        const p0 = poly[q], p1 = poly[(q + 1) % poly.length];
+        area += p0[0] * p1[1] - p1[0] * p0[1];
+      }
+      if (area < 0) poly = poly.reverse();
+      const mb = new MeshBuilder();
+      for (const p of poly) mb.vertex(p, Math.hypot(p[0] - R[0], p[1] - R[1]) / s.width, sAt(end) / SEAL_LENGTH);
+      const tris = earcut(poly.flatMap((p) => [p[0], p[1]]));
+      for (let t = 0; t < tris.length; t += 3) {
+        const [p0, p1, p2] = [poly[tris[t]], poly[tris[t + 1]], poly[tris[t + 2]]];
+        const cross = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+        if (cross >= 0) mb.tri(tris[t], tris[t + 1], tris[t + 2]);
+        else mb.tri(tris[t], tris[t + 2], tris[t + 1]);
+      }
+      const ci = Math.floor(end / CHUNK_SECTIONS);
+      if (mb.indices.length) road.push(mb.toKn5(`1ROAD_RBC${k}_${j++}`, materialFor(ci, s.width, s)));
     }
   });
   return { road, verge };
@@ -153,7 +205,13 @@ export function buildWalls(plan: RoadPlan, opts: BuildOptions, terrain: HeightFn
           wb.vertex([p[0], p[1], top], 0, 0);
         }
       }
+      // Near a roundabout the ring's own wall takes over.
+      const nearRing = (i: number) => {
+        const p = samples[i % n].pos;
+        return !!inRoundabout(plan, p[0], p[1], Math.max(opts.vergeWidth + 1, opts.wallOffset) + 4);
+      };
       for (let r = 0; r < b - a; r++) {
+        if (nearRing(a + r) || nearRing(a + r + 1)) continue;
         const p = r * 4, q = p + 4;
         // Both windings, so the wall collides from either side.
         wb.quad(p, q, q + 1, p + 1);

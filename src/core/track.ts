@@ -12,7 +12,8 @@ import { frameTransform, IDENTITY, writeKn5, type Kn5GroupNode, type Kn5Material
 import { toAc } from "./mesh";
 import { withDefaults, type BuildOptions } from "./options";
 import { simplify } from "./polyline";
-import { applyElevation, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
+import { applyElevation, inRoundabout, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
+import { buildRingMeshes, buildRingWall, innerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls } from "./roadMesh";
 import { buildMarkings } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
@@ -39,6 +40,8 @@ export interface DataSources {
   } | null>;
   /** OSM features near the road, already fetched. */
   osm?: OsmFeatures;
+  /** Roundabouts the router says the route goes round. */
+  roundabouts?: RoundaboutHint[];
   /** Road class at a point (OpenMapTiles: motorway, primary, minor, ...). */
   roadClassAt?(p: LngLat): string | undefined;
   /** Asphalt width at a point from map data, metres. */
@@ -51,6 +54,8 @@ export interface OsmFeatures {
   /** Footprints (first point not repeated) with OSM / vector tile tags. */
   buildings: { ring: LngLat[]; tags: Record<string, string> }[];
   guardRails: LngLat[][];
+  /** OSM junction=roundabout ways near the route. */
+  roundaboutRings?: LngLat[][];
 }
 
 export interface TrackResult {
@@ -185,7 +190,8 @@ export async function buildTrack(
   const proj = new LocalProjection(centre);
   const local = route.map((p) => proj.toLocal(p));
   const widthFn = sources.widthAt ? (x: number, y: number) => sources.widthAt!(proj.toLngLat([x, y])) : undefined;
-  const plan = planRoad(local, opts, widthFn);
+  const circles = resolveRoundabouts(sources.roundabouts ?? [], sources.osm?.roundaboutRings ?? [], proj);
+  const plan = planRoad(local, opts, widthFn, circles);
   if (plan.length < MIN_LENGTH) throw new Error(`Road is ${Math.round(plan.length)} m; make it at least ${MIN_LENGTH} m`);
 
   await progress("Fetching elevation");
@@ -258,7 +264,8 @@ export async function buildTrack(
   const mapped: Building[] = opts.buildings
     ? (sources.osm?.buildings ?? []).map((b, i) => fromOsm(b.ring.map((p) => proj.toLocal(p)), b.tags, i))
     : [];
-  const kept = filterBuildings([...mapped, ...detected], index, opts, opts.buildingRadius);
+  const kept = filterBuildings([...mapped, ...detected], index, opts, opts.buildingRadius)
+    .filter((b) => !b.ring.some(([x, y]) => inRoundabout(plan, x, y, opts.vergeWidth + 2)));
 
   await progress("Building road and terrain meshes");
   // Road surface per chunk: dense asphalt on major roads and in built-up
@@ -286,7 +293,20 @@ export async function buildTrack(
     return name;
   };
   const roadMeshes = buildRoadMeshes(plan, opts, roadMaterial);
-  const markings = opts.markings ? buildMarkings(plan, opts) : [];
+  const sampleNear = (sd: number) => plan.samples[Math.max(0, Math.min(plan.samples.length - 1, Math.round(sd / opts.spacing)))];
+  const markings = opts.markings
+    ? buildMarkings(plan, opts, (sd) => {
+      const p = sampleNear(sd).pos;
+      return !!inRoundabout(plan, p[0], p[1], 1);
+    })
+    : [];
+  // The full circulating carriageway and island of each roundabout.
+  const ringNodes: Kn5Node[] = [];
+  plan.roundabouts.forEach((rb, k) => {
+    const nearest = plan.samples.reduce((a, s) => (Math.abs(s.s - rb.sIn) < Math.abs(a.s - rb.sIn) ? s : a));
+    const m = buildRingMeshes(rb, k, opts, roadMaterial(Math.floor(plan.samples.indexOf(nearest) / 120), rb.w, nearest));
+    ringNodes.push(m.road, m.island, m.verge);
+  });
   const terrainNodes: Kn5Node[] = [];
   for (const [i, chunk] of chunks.entries()) {
     await progress("Building road and terrain meshes", i / chunks.length);
@@ -302,12 +322,36 @@ export async function buildTrack(
   const walls = buildWalls(plan, opts, ground, index);
 
   await progress("Placing scenery");
-  const trees = buildTrees(filterTrees(treeSpots, index, opts, opts.maxTrees), ground);
+  const offRings = (spots: TreeSpot[]) => spots.filter((t) => !inRoundabout(plan, t.x, t.y, opts.vergeWidth + 3));
+  const trees = buildTrees(offRings(filterTrees(treeSpots, index, opts, opts.maxTrees)), ground);
+  // A tree and a ring of shrubs on each island big enough for them.
+  const islandTrees = plan.roundabouts.flatMap((rb) => {
+    const ri = innerRadius(rb);
+    if (opts.trees <= 0 || ri < 4) return [];
+    const shrubs: TreeSpot[] = [{ x: rb.c[0], y: rb.c[1], scale: Math.min(0.9, ri / 12), variant: 0 }];
+    const count = Math.floor(ri);
+    for (let k = 0; k < count; k++) {
+      const a = (k / count) * 2 * Math.PI;
+      shrubs.push({ x: rb.c[0] + Math.cos(a) * ri * 0.55, y: rb.c[1] + Math.sin(a) * ri * 0.55, scale: 0.22, variant: k % 2 });
+    }
+    return shrubs;
+  });
+  const islandGround = (x: number, y: number) => {
+    const rb = inRoundabout(plan, x, y)!;
+    return ringHeight(rb, innerRadius(rb)) + 0.55;
+  };
+  const shrubs = islandTrees.length ? buildTrees(islandTrees, islandGround, "ISLANDTREES") : [];
+  const ringWalls = plan.roundabouts.map((rb, k) => buildRingWall(rb, k, opts, ground)).filter((w): w is Kn5Node & { kind: "mesh" } => !!w);
+
   const osmRails = opts.guardRails ? (sources.osm?.guardRails ?? []).map((l) => l.map((p) => proj.toLocal(p))) : [];
   const needs = railNeeds(plan, opts, ground, osmRails, index);
   if (!opts.guardRails) needs.forEach((side) => side.fill(false));
+  // No rails or posts on or beside a roundabout.
+  const nearRing = plan.samples.map((s) => !!inRoundabout(plan, s.pos[0], s.pos[1], 15));
+  needs.forEach((side) => side.forEach((_, i) => { if (nearRing[i]) side[i] = false; }));
   const rails = buildGuardRails(plan, opts, needs);
-  const posts = opts.guidePosts ? buildGuidePosts(plan, opts, needs) : [];
+  const postMask = needs.map((side) => side.map((v, i) => v || nearRing[i])) as [boolean[], boolean[]];
+  const posts = opts.guidePosts ? buildGuidePosts(plan, opts, postMask) : [];
   // Inside the corridor buildings stand on the detailed terrain; further out, on the horizon mesh.
   const buildingGround = (x: number, y: number) => {
     const n = index.nearest(x, y, opts.corridor - 1);
@@ -322,6 +366,7 @@ export async function buildTrack(
     materials,
     root: group(slug, [
       group("ROAD", roadMeshes.road),
+      group("ROUNDABOUTS", [...ringNodes, ...shrubs, ...ringWalls]),
       group("MARKINGS", markings),
       group("VERGE", roadMeshes.verge),
       group("TERRAIN", terrainNodes),

@@ -136,7 +136,7 @@ const TREE_PLANES = 3;
 const TREE_VERTS = TREE_PLANES * 8;
 
 /** Crossed-quad trees (three planes, both faces), alpha-tested. */
-export function buildTrees(spots: TreeSpot[], ground: HeightFn): Kn5MeshNode[] {
+export function buildTrees(spots: TreeSpot[], ground: HeightFn, name = "TREES"): Kn5MeshNode[] {
   const rand = rng(99);
   const out = new ChunkedMesh(TREE_VERTS);
   for (const t of spots) {
@@ -169,7 +169,7 @@ export function buildTrees(spots: TreeSpot[], ground: HeightFn): Kn5MeshNode[] {
       }
     }
   }
-  return out.all().map((mb, i) => mb.toKn5(`TREES_${pad(i)}`, "trees", { castShadows: true }));
+  return out.all().map((mb, i) => mb.toKn5(`${name}_${pad(i)}`, "trees", { castShadows: true }));
 }
 
 /* ---------------- boxes ---------------- */

@@ -421,6 +421,7 @@ $("build").onclick = async () => {
       imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages) : undefined,
       widthAt,
       osm: osm.features,
+      roundabouts: current.roundabouts,
       roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
       imageryCredit: IMAGERY.esri.credit,
     }, placeMeta, report);

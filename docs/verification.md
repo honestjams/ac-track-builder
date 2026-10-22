@@ -30,6 +30,8 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 13 | Trees show cut-out foliage (not solid rectangles), lit on both sides | `trees` material: `ksPerPixelAT`, alpha-tested |
 | 14 | Guard rails stop the car and sit on the verge, not floating or buried | `1WALL_RAIL_*`, `buildGuardRails` |
 | 15 | Buildings stand on the ground and are solid | `1WALL_BLD_*`, `buildBuildings` |
+| 16 | Line markings don't flicker against the road at a distance | `LIFT` in `markings.ts` (15 mm) |
+| 17 | Roundabouts drive as a smooth circle; the kerb is mountable; no bump where the road meets the ring | `roundabout.ts`, connectors in `roadMesh.ts` |
 
 ## Known unknowns
 

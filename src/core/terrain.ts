@@ -9,6 +9,7 @@ import type { Kn5MeshNode } from "./kn5";
 import { MeshBuilder } from "./mesh";
 import type { BuildOptions } from "./options";
 import type { RoadPlan, SegmentIndex } from "./road";
+import { outerRadius, ringHeight } from "./roundabout";
 
 export interface TerrainChunk {
   key: string;
@@ -52,20 +53,42 @@ export interface TerrainSample {
 /** The finished ground height anywhere: DEM blended into the road. */
 export function makeTerrainFn(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: BuildOptions): (x: number, y: number) => TerrainSample {
   const lastSeg = index.segmentCount - 1;
+  const road = roadTerrain(plan, index, dem, opts, lastSeg);
   return (x, y) => {
+    const fromRoad = road(x, y);
+    // A roundabout is a level disc; near one, whichever edge is closer wins.
+    for (const rb of plan.roundabouts) {
+      const d = Math.hypot(x - rb.c[0], y - rb.c[1]);
+      const edge = outerRadius(rb) + opts.vergeWidth;
+      if (d > edge + opts.terrainBlend) continue;
+      if (d <= edge) return { h: ringHeight(rb, Math.min(d, outerRadius(rb))) - UNDER_ROAD, dist: Math.min(fromRoad.dist, 0) };
+      if (fromRoad.dist <= fromRoad.inner) return fromRoad;
+      const base = ringHeight(rb, outerRadius(rb)) - BELOW_VERGE;
+      const f = smoothstep((d - edge) / opts.terrainBlend);
+      const h = base + (dem(x, y) - base) * f;
+      // Blend toward whichever feature pulls the ground further from the DEM.
+      const ground = dem(x, y);
+      return Math.abs(h - ground) > Math.abs(fromRoad.h - ground) ? { h, dist: Math.min(fromRoad.dist, d) } : fromRoad;
+    }
+    return fromRoad;
+  };
+}
+
+function roadTerrain(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: BuildOptions, lastSeg: number) {
+  return (x: number, y: number): TerrainSample & { inner: number } => {
     const ground = dem(x, y);
     const n = index.nearest(x, y, opts.corridor + opts.terrainBlend + 10);
-    if (!n) return { h: ground, dist: Infinity };
+    if (!n) return { h: ground, dist: Infinity, inner: 0 };
     const v = index.at(n);
     const half = v.width / 2;
     const inner = half + opts.vergeWidth;
     const tc = Math.max(-half, Math.min(half, n.t));
     const edge = v.h + v.bank * tc - opts.crown * Math.abs(tc);
     const beyondEnd = !plan.closed && ((n.seg === 0 && n.frac === 0) || (n.seg === lastSeg && n.frac === 1));
-    if (!beyondEnd && n.dist <= inner) return { h: edge - UNDER_ROAD, dist: n.dist };
+    if (!beyondEnd && n.dist <= inner) return { h: edge - UNDER_ROAD, dist: n.dist, inner };
     const base = edge - BELOW_VERGE;
     const f = smoothstep((n.dist - inner) / opts.terrainBlend);
-    return { h: base + (ground - base) * f, dist: n.dist };
+    return { h: base + (ground - base) * f, dist: n.dist, inner };
   };
 }
 

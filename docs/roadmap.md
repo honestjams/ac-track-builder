@@ -4,9 +4,11 @@ Rough priority order. Each chunk is a self-contained change.
 
 1. **First in-game test.** Run through [verification.md](verification.md) and
    fix whatever it turns up.
-2. ~~Trees, guard rails, guide posts, buildings.~~ Done. Next steps for
+2. ~~Trees, guard rails, guide posts, buildings, Australian surfaces and
+   markings, roundabouts.~~ Done. Next steps for
    scenery: tree trunk collision, pitched roofs, more tree species per
-   region, power poles and road signs, and CSP grass FX on grassy terrain.
+   region, power poles and road signs, give-way lines at roundabout entries,
+   multi-lane roundabouts, and CSP grass FX on grassy terrain.
 3. **Truer road edges.** Snap the width to the asphalt visible in the aerial
    imagery (Street2Sim's "traced from aerial imagery" step).
 4. **Higher-resolution elevation.** Use national lidar where it's open (e.g.
