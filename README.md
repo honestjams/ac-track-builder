@@ -1,0 +1,109 @@
+# AC Track Builder
+
+Turn any real road into an Assetto Corsa track, in your browser. Search for a
+road, drop a start and a finish pin, press **Build**, and download a zip that
+installs straight into Content Manager.
+
+It is a from-scratch take on what [Street2Sim](https://www.street2sim.com/)
+does (see [docs/how-street2sim-works.md](docs/how-street2sim-works.md)), but
+everything runs client-side: no server, no account, no queue.
+
+## What you get
+
+- The real road, routed along the OpenStreetMap network between your pins
+  (add pins in between to force a route, or tick **Loop back to start** for a
+  circuit).
+- Real elevation from open terrain data, smoothed along the road, with a 2%
+  crown and banking in corners.
+- Road width from OSM `width` / `lanes` / road class, or a width you choose.
+- Asphalt with edge lines and a dashed centre line, gravel verges, and terrain
+  each side of the road textured with aerial imagery.
+- Low-detail horizon terrain out to 1.5 km so the world doesn't end at the
+  roadside.
+- Invisible walls that keep you on the road and pull in where switchbacks
+  pass close to each other.
+- Pit boxes, a starting grid, hotlap start, A-to-B start/finish timing (or a
+  start/finish line for loops), and an AI line (`fast_lane.ai`).
+- Content Manager extras: `ui_track.json` with name, length, geotags and
+  country, an outline, a preview render, and the in-game map.
+
+## Running it
+
+```bash
+npm install
+npm run dev        # http://localhost:5173
+npm test           # format round-trips + a full synthetic build
+npm run build      # static site in dist/, host it anywhere
+```
+
+## Installing a track
+
+Drag the downloaded zip onto Content Manager and click **Install**, or unzip
+it into `steamapps/common/assettocorsa/content/tracks/`. The zip contains one
+folder (`<track>/` with `ui/`, `data/`, `ai/` and the `.kn5`), so nothing ends
+up nested too deep.
+
+## How a build works
+
+```
+pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Mercator)
+                                   │
+            Overpass (OSM widths) ─┤
+                                   ▼
+                     smoothed centreline, sampled every 2 m
+                     width · banking · crown
+                                   │
+        Terrarium elevation tiles ─┤──▶ smoothed height profile
+                                   ▼
+   road ribbon · verges · terrain grid (blended into the road) · walls
+   horizon terrain · spawn/timing dummies · AI line
+                                   │
+           Esri aerial tiles ──────┤──▶ one DXT1 .dds per 200 m chunk
+                                   ▼
+            .kn5 + fast_lane.ai + data/ + ui/ + map.png ──▶ zip
+```
+
+| Path | What it does |
+| --- | --- |
+| `src/core/kn5.ts` | `.kn5` writer and reader (textures, materials, node tree) |
+| `src/core/aiSpline.ts` | `fast_lane.ai` v7 writer and reader |
+| `src/core/dds.ts`, `png.ts` | DXT1 DDS and PNG encoders |
+| `src/core/geo.ts` | Local projection that lines up exactly with web map tiles |
+| `src/core/road.ts`, `polyline.ts` | Centreline smoothing, widths, banking, nearest-point index |
+| `src/core/roadMesh.ts` | Road, verge and wall meshes |
+| `src/core/terrain.ts`, `backdrop.ts` | Drivable terrain corridor and horizon scenery |
+| `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
+| `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |
+| `src/core/track.ts` | The whole pipeline; network access is injected |
+| `src/services/` | OSRM, Photon/Nominatim, Overpass, tile fetching (browser only) |
+| `src/ui/` | Map UI and three.js preview |
+
+`src/core` has no DOM or network code, so the whole pipeline runs under
+Node in the tests with synthetic terrain.
+
+## Data sources and licences
+
+- Roads: © OpenStreetMap contributors, ODbL. Routing by the public
+  [OSRM](https://project-osrm.org) demo server; place search by
+  [Photon](https://photon.komoot.io) and Nominatim.
+- Elevation: [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/)
+  (SRTM, USGS 3DEP, GMTED and national lidar where available).
+- Aerial imagery: Esri World Imagery. Fine for building tracks for yourself;
+  **don't publish or sell tracks that contain it.** Pick
+  **Aerial imagery → Off** for a track you want to share, and it uses a
+  procedural grass texture instead.
+
+The public OSRM, Nominatim and Overpass servers are free community services
+with fair-use policies. They're fine for personal use. If this ever gets
+real traffic, run your own instances or use a paid provider.
+
+Assetto Corsa is a trademark of Kunos Simulazioni. This project is not
+affiliated with or endorsed by Kunos.
+
+## Status
+
+Every file format is cross-checked against Content Manager's and
+AssettoServer's readers and round-trip tested, but nothing has been loaded
+in the game yet. [docs/verification.md](docs/verification.md) is the
+checklist for the first in-game test, and [docs/roadmap.md](docs/roadmap.md)
+lists what comes next.
