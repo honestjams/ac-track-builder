@@ -16,13 +16,14 @@ import { buildRoadMeshes, buildWalls } from "./roadMesh";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
 import { asphaltTexture, grassTexture, solidTexture, vergeTexture } from "./textures";
 
-export type Progress = (stage: string, fraction?: number) => void;
+/** Progress callback; a returned promise is awaited, which lets a UI repaint. */
+export type Progress = (stage: string, fraction?: number) => void | Promise<void>;
 
 export interface DataSources {
   /** Height sampler (local metres) covering `bounds`. */
   dem(proj: LocalProjection, bounds: Bounds, zoom: number): Promise<HeightFn>;
   /** Image bytes (PNG or JPEG) covering the chunk square, north up; null to fall back to grass. */
-  imagery?(proj: LocalProjection, chunk: TerrainChunk, zoom: number, size: number): Promise<{ data: Uint8Array; ext: "png" | "jpg" } | null>;
+  imagery?(proj: LocalProjection, chunk: TerrainChunk, zoom: number, size: number): Promise<{ data: Uint8Array; ext: "png" | "jpg" | "dds" } | null>;
   /** Asphalt width at a point from map data, metres. */
   widthAt?(p: LngLat): number | undefined;
   /** Credit line for the imagery source, written into the README. */
@@ -149,7 +150,7 @@ export async function buildTrack(
   const opts = withDefaults(partial);
   if (route.length < 2) throw new Error("Pick a start and a finish on the map first");
 
-  progress("Laying out the road");
+  await progress("Laying out the road");
   const lngs = route.map((p) => p[0]), lats = route.map((p) => p[1]);
   const centre: LngLat = [(Math.min(...lngs) + Math.max(...lngs)) / 2, (Math.min(...lats) + Math.max(...lats)) / 2];
   const proj = new LocalProjection(centre);
@@ -158,7 +159,7 @@ export async function buildTrack(
   const plan = planRoad(local, opts, widthFn);
   if (plan.length < MIN_LENGTH) throw new Error(`Road is ${Math.round(plan.length)} m; make it at least ${MIN_LENGTH} m`);
 
-  progress("Fetching elevation");
+  await progress("Fetching elevation");
   const bounds = boundsOf(plan.samples.map((s) => s.pos), opts.corridor + opts.terrainBlend + 60);
   const dem = await sources.dem(proj, bounds, opts.demZoom);
   applyElevation(plan, dem, opts);
@@ -185,7 +186,7 @@ export async function buildTrack(
   if (sources.imagery && opts.imageryZoom > 0) {
     let done = 0;
     for (const chunk of chunks) {
-      progress("Fetching aerial imagery", done / chunks.length);
+      await progress("Fetching aerial imagery", done / chunks.length);
       const img = await sources.imagery(proj, chunk, opts.imageryZoom, opts.textureSize);
       done++;
       if (!img) continue;
@@ -197,14 +198,14 @@ export async function buildTrack(
     }
   }
 
-  progress("Building road and terrain meshes");
+  await progress("Building road and terrain meshes");
   const roadMeshes = buildRoadMeshes(plan, opts);
   const terrainNodes: Kn5Node[] = [];
-  chunks.forEach((chunk, i) => {
-    progress("Building road and terrain meshes", i / chunks.length);
+  for (const [i, chunk] of chunks.entries()) {
+    await progress("Building road and terrain meshes", i / chunks.length);
     const mesh = buildTerrainChunk(chunk, terrainAt, opts, textured.has(chunk.key));
     if (mesh) terrainNodes.push(mesh);
-  });
+  }
   const walls = buildWalls(plan, opts, (x, y) => terrainAt(x, y).h, index);
 
   const group = (name: string, children: Kn5Node[]): Kn5GroupNode => ({ kind: "node", name, transform: IDENTITY, children });
@@ -221,7 +222,7 @@ export async function buildTrack(
     ]),
   };
 
-  progress("Writing track files");
+  await progress("Writing track files");
   const kn5 = writeKn5(model);
   const ai = writeFastLaneAi(buildAiLine(plan));
   const outline2d = simplify(plan.samples.map((s) => s.pos), 0.5).map(([x, y]) => [x, -y] as [number, number]);
@@ -247,7 +248,7 @@ export async function buildTrack(
   let climb = 0;
   for (let i = 1; i < hs.length; i++) climb += Math.max(0, hs[i] - hs[i - 1]);
   const geo = countGeometry(model.root);
-  progress("Done", 1);
+  await progress("Done", 1);
   return {
     slug, files, model, plan, proj,
     stats: {

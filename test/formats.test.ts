@@ -101,3 +101,19 @@ describe("png", () => {
     expect(raw[10 + 0]).toBe((0 - 255) & 0xff);
   });
 });
+
+describe("dds", () => {
+  it("writes a DXT1 header and a full mip chain", async () => {
+    const { encodeDdsDxt1 } = await import("../src/core/dds");
+    const px = new Uint8Array(8 * 8 * 4);
+    for (let i = 0; i < 64; i++) px.set([255, 0, 0, 255], i * 4);
+    const dds = encodeDdsDxt1(px, 8, 8);
+    const v = new DataView(dds.buffer);
+    expect(new TextDecoder().decode(dds.subarray(0, 4))).toBe("DDS ");
+    expect(v.getUint32(4, true)).toBe(124);
+    expect(v.getUint32(28, true)).toBe(4); // 8, 4, 2, 1
+    expect(new TextDecoder().decode(dds.subarray(84, 88))).toBe("DXT1");
+    expect(dds.length).toBe(128 + (4 + 1 + 1 + 1) * 8);
+    expect(v.getUint16(128, true)).toBe(0xf800); // pure red endpoint
+  });
+});
