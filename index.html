@@ -84,6 +84,13 @@
             </label>
           </div>
           <div class="grid2">
+            <label class="field">Buildings
+              <select id="buildings">
+                <option value="all" selected>Mapped + from imagery</option>
+                <option value="mapped">Mapped only</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
             <label class="field">Trees (from aerial imagery)
               <select id="trees">
                 <option value="0">Off</option>
@@ -94,7 +101,6 @@
             <div class="checks">
               <label class="toggle"><input id="guardRails" type="checkbox" checked /> Guard rails</label>
               <label class="toggle"><input id="guidePosts" type="checkbox" checked /> Guide posts</label>
-              <label class="toggle"><input id="buildings" type="checkbox" checked /> Buildings</label>
             </div>
           </div>
           <details>

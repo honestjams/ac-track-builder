@@ -90,7 +90,7 @@ function wayWidth(tags: Record<string, string>): number | undefined {
   return CLASS_WIDTH[tags.highway];
 }
 
-interface Way {
+export interface Way {
   width: number;
   pts: LngLat[];
 }
@@ -108,20 +108,18 @@ export interface OsmData {
 }
 
 /**
- * One Overpass query for everything the build uses from OSM along the route:
- * the road ways (for widths), guard rails, and building footprints within
- * `radius` metres. Every public mirror is asked at once and the first good
- * answer wins; if all fail, the build goes ahead with defaults and no
- * buildings.
+ * One Overpass query for the road ways under the route (for widths) and
+ * guard rails. Every public mirror is asked at once and the first good
+ * answer wins; if all fail, the build falls back to widths by road class
+ * from the vector tiles. Buildings come from the vector tiles too.
  */
-export async function fetchOsm(routeCoords: LngLat[], radius: number, wantBuildings: boolean): Promise<OsmData> {
+export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
   const step = Math.max(1, Math.ceil(routeCoords.length / 180));
   const sampled = routeCoords.filter((_, i) => i % step === 0 || i === routeCoords.length - 1);
   const around = sampled.map((p) => `${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(",");
   const query = `[out:json][timeout:40];(
     way(around:12,${around})[highway];
     way(around:15,${around})[barrier=guard_rail];
-    ${wantBuildings ? `way(around:${Math.round(radius)},${around})[building];` : ""}
   );out tags geom;`;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 45000);
@@ -146,12 +144,7 @@ export async function fetchOsm(routeCoords: LngLat[], radius: number, wantBuildi
   for (const e of elements) {
     const tags = e.tags ?? {};
     const pts = e.geometry!.map((g) => [g.lon, g.lat] as LngLat);
-    if (tags.building) {
-      // closed ways only; drop the repeated last point
-      if (pts.length >= 4 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) {
-        features.buildings.push({ ring: pts.slice(0, -1), tags });
-      }
-    } else if (tags.barrier === "guard_rail") {
+    if (tags.barrier === "guard_rail") {
       features.guardRails.push(pts);
     } else if (tags.highway) {
       const width = wayWidth(tags);
@@ -161,7 +154,7 @@ export async function fetchOsm(routeCoords: LngLat[], radius: number, wantBuildi
   return { features, widthAt: ways.length ? widthLookup(ways, routeCoords[0][1]) : undefined };
 }
 
-function widthLookup(ways: Way[], lat: number): (p: LngLat) => number | undefined {
+export function widthLookup(ways: Way[], lat: number): (p: LngLat) => number | undefined {
   const kx = Math.cos((lat * Math.PI) / 180) * 111320, ky = 111320;
   return (p) => {
     let best: number | undefined, bestD = 12 * 12;

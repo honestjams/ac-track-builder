@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildTrack, type DataSources } from "../src/core/track";
 import { DemGrid } from "../src/core/elevation";
 import { readKn5, type Kn5MeshNode, type Kn5Node } from "../src/core/kn5";
-import { buildingHeight, treeSpotsFromImagery } from "../src/core/scenery";
+import { treeSpotsFromImagery } from "../src/core/scenery";
 import type { LngLat } from "../src/core/geo";
 
 const lat0 = -27.92, lng0 = 153.19;
@@ -38,15 +38,6 @@ describe("tree detection", () => {
 
   it("returns nothing when trees are off", () => {
     expect(treeSpotsFromImagery(fakeAerial(64), 64, { key: "t", minX: 0, minY: 0, maxX: 200, maxY: 200 }, 0)).toEqual([]);
-  });
-});
-
-describe("building heights", () => {
-  it("prefers height, then levels, then the building type", () => {
-    expect(buildingHeight({ building: "yes", height: "12.5 m" })).toBe(12.5);
-    expect(buildingHeight({ building: "apartments", "building:levels": "4" })).toBe(13);
-    expect(buildingHeight({ building: "house" })).toBe(6);
-    expect(buildingHeight({ building: "shed" })).toBe(3.5);
   });
 });
 
@@ -109,16 +100,18 @@ describe("buildTrack with scenery", async () => {
     expect(all.some((m) => m.name.startsWith("GUIDEPOSTS_"))).toBe(true);
   });
 
-  it("extrudes OSM buildings and drops ones on the road", () => {
+  it("extrudes mapped buildings with a gable roof and drops ones on the road", () => {
     expect(result.stats.buildings).toBe(1);
+    expect(result.stats.buildingsDetected).toBe(0);
     const walls = all.filter((m) => m.name.startsWith("1WALL_BLD_"));
-    const roofs = all.filter((m) => m.name.startsWith("ROOFS_"));
+    const roofs = all.filter((m) => m.name.startsWith("ROOF_"));
     expect(walls).toHaveLength(1);
     expect(roofs).toHaveLength(1);
-    // roof faces up, 6 m house above sloping ground
-    expect(roofs[0].normals[1]).toBeCloseTo(1);
-    const roofY = roofs[0].positions[1];
-    expect(roofY).toBeGreaterThan(slope(0, 40) + 5);
+    // two roof planes tilted up, ridge above the 3 m eaves on sloping ground
+    for (let i = 0; i < roofs[0].normals.length; i += 3) expect(roofs[0].normals[i + 1]).toBeGreaterThan(0.85);
+    const ys = Array.from(roofs[0].positions).filter((_, i) => i % 3 === 1);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(1.5);
+    expect(Math.max(...ys)).toBeGreaterThan(slope(0, 40) + 4);
     // walls face outward: the wall nearest the road (y = 30) faces south (AC +z)
     let found = false;
     for (let i = 0; i < walls[0].positions.length; i += 3) {

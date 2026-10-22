@@ -31,6 +31,14 @@ export function planBackdrop(plan: RoadPlan, index: SegmentIndex, opts: BuildOpt
   return out;
 }
 
+/** The horizon surface height at a point (before grid interpolation). */
+export function backdropHeight(dem: HeightFn, index: SegmentIndex, opts: BuildOptions, x: number, y: number): number {
+  const near = index.nearest(x, y, opts.corridor + 300);
+  const d = near ? near.dist : Infinity;
+  const t = Math.min(1, Math.max(0, (d - opts.corridor) / 300));
+  return dem(x, y) - SINK * (1 - t * t * (3 - 2 * t));
+}
+
 export function buildBackdropChunk(
   chunk: TerrainChunk,
   dem: HeightFn,
@@ -48,10 +56,8 @@ export function buildBackdropChunk(
     for (let i = 0; i < N; i++) {
       const x = chunk.minX + i * STEP, y = chunk.minY + j * STEP;
       const near = index.nearest(x, y, opts.corridor + 300);
-      const d = near ? near.dist : Infinity;
-      keep[j * N + i] = d > hole ? 1 : 0;
-      const t = Math.min(1, Math.max(0, (d - opts.corridor) / 300));
-      hs[j * N + i] = dem(x, y) - SINK * (1 - t * t * (3 - 2 * t));
+      keep[j * N + i] = (near ? near.dist : Infinity) > hole ? 1 : 0;
+      hs[j * N + i] = backdropHeight(dem, index, opts, x, y);
     }
   }
   const mb = new MeshBuilder();

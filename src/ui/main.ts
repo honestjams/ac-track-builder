@@ -5,9 +5,10 @@ import type { LngLat } from "../core/geo";
 import { buildTrack, type TrackResult } from "../core/track";
 import { zipTrack } from "../core/zip";
 import type { BuildOptions } from "../core/options";
-import { fetchOsm, reverseGeocode, route, searchPlaces, type Place, type Route } from "../services/osm";
+import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
 import { IMAGERY, loadChunkImagery, loadDem } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
+import { classWidths, fetchTileFeatures } from "../services/vectorTiles";
 
 const MAX_KM = 30;
 
@@ -351,8 +352,16 @@ function readOptions(): Partial<BuildOptions> {
     trees: imagery === "off" ? 0 : num("trees"),
     guardRails: $<HTMLInputElement>("guardRails").checked,
     guidePosts: $<HTMLInputElement>("guidePosts").checked,
-    buildings: $<HTMLInputElement>("buildings").checked,
+    buildings: $<HTMLSelectElement>("buildings").value !== "off",
+    detectBuildings: $<HTMLSelectElement>("buildings").value === "all",
   };
+}
+
+/** [west, south, east, north] around the route, padded by `metres`. */
+function paddedBounds(coords: LngLat[], metres: number): [number, number, number, number] {
+  const lats = coords.map((p) => p[1]), lngs = coords.map((p) => p[0]);
+  const dLat = metres / 111320, dLng = metres / (111320 * Math.cos((lats[0] * Math.PI) / 180));
+  return [Math.min(...lngs) - dLng, Math.min(...lats) - dLat, Math.max(...lngs) + dLng, Math.max(...lats) + dLat];
 }
 
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
@@ -395,8 +404,16 @@ $("build").onclick = async () => {
   };
   try {
     await report("Fetching OpenStreetMap data");
-    const osm = await fetchOsm(current.coords, opts.corridor ?? 90, !!opts.buildings);
-    const widthAt = opts.widthOverride ? undefined : osm.widthAt;
+    const [osm, tiles] = await Promise.all([
+      fetchOsm(current.coords),
+      fetchTileFeatures(paddedBounds(current.coords, (opts.buildingRadius ?? 250) + 50)).catch(() => null),
+    ]);
+    if (tiles) osm.features.buildings = tiles.buildings;
+    // Overpass widths when it answered; otherwise widths by road class from the tiles.
+    const tileWidths = tiles ? classWidths(tiles.roads) : [];
+    const widthAt = opts.widthOverride
+      ? undefined
+      : osm.widthAt ?? (tileWidths.length ? widthLookup(tileWidths, current.coords[0][1]) : undefined);
     const result = await buildTrack(current.coords, opts, {
       dem: (proj, bounds, z) => loadDem(proj, bounds, z),
       imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages) : undefined,
@@ -445,7 +462,7 @@ function showStats(r: TrackResult, widthFallback: boolean): void {
     ["Climb", `${Math.round(s.climb)} m`],
     ["Avg width", `${s.meanWidth.toFixed(1)} m${widthFallback ? " (default)" : ""}`],
     ["Trees", s.trees.toLocaleString()],
-    ["Buildings", s.buildings.toLocaleString()],
+    ["Buildings", `${s.buildings.toLocaleString()}${s.buildingsDetected ? ` (${s.buildingsDetected} from imagery)` : ""}`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
     ["Triangles", s.triangles.toLocaleString()],
   ];

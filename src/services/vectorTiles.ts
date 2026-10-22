@@ -1,0 +1,123 @@
+// OpenFreeMap vector tiles (OpenMapTiles schema): building footprints with
+// render heights, and road class / surface along the route. Served from a
+// CDN, keyless, so unlike the public Overpass servers it is reliably up.
+
+import { VectorTile } from "@mapbox/vector-tile";
+import { PbfReader } from "pbf";
+import { lngLatToPixel, pixelToLngLat, type LngLat } from "../core/geo";
+
+const TILEJSON = "https://tiles.openfreemap.org/planet";
+const Z = 14;
+
+let template: Promise<string> | null = null;
+
+function tileTemplate(): Promise<string> {
+  template ??= fetch(TILEJSON)
+    .then((r) => r.json())
+    .then((j) => j.tiles[0] as string)
+    .catch((e) => {
+      template = null;
+      throw e;
+    });
+  return template;
+}
+
+export interface TileBuilding {
+  ring: LngLat[];
+  tags: Record<string, string>;
+}
+
+export interface TileRoad {
+  pts: LngLat[];
+  cls: string;
+  surface?: string;
+}
+
+type P = { x: number; y: number };
+
+/** Clips a ring to the tile square (Sutherland-Hodgman), so buildings split across tiles meet exactly. */
+function clipToTile(ring: P[], extent: number): P[] {
+  let out = ring;
+  const edges: [(p: P) => boolean, (a: P, b: P) => P][] = [
+    [(p) => p.x >= 0, (a, b) => ({ x: 0, y: a.y + ((b.y - a.y) * (0 - a.x)) / (b.x - a.x) })],
+    [(p) => p.x <= extent, (a, b) => ({ x: extent, y: a.y + ((b.y - a.y) * (extent - a.x)) / (b.x - a.x) })],
+    [(p) => p.y >= 0, (a, b) => ({ x: a.x + ((b.x - a.x) * (0 - a.y)) / (b.y - a.y), y: 0 })],
+    [(p) => p.y <= extent, (a, b) => ({ x: a.x + ((b.x - a.x) * (extent - a.y)) / (b.y - a.y), y: extent })],
+  ];
+  for (const [inside, cut] of edges) {
+    const input = out;
+    out = [];
+    for (let i = 0; i < input.length; i++) {
+      const a = input[(i + input.length - 1) % input.length], b = input[i];
+      if (inside(b)) {
+        if (!inside(a)) out.push(cut(a, b));
+        out.push(b);
+      } else if (inside(a)) out.push(cut(a, b));
+    }
+    if (!out.length) break;
+  }
+  return out;
+}
+
+function signedArea(r: P[]): number {
+  let a = 0;
+  for (let i = 0; i < r.length; i++) {
+    const p = r[i], q = r[(i + 1) % r.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a / 2;
+}
+
+/** Buildings and roads from every z14 tile covering [west, south, east, north]. */
+export async function fetchTileFeatures(bbox: [number, number, number, number]): Promise<{ buildings: TileBuilding[]; roads: TileRoad[] }> {
+  const url = await tileTemplate();
+  const [w, s, e, n] = bbox;
+  const a = lngLatToPixel([w, n], Z), b = lngLatToPixel([e, s], Z);
+  const x0 = Math.floor(a[0] / 256), x1 = Math.floor(b[0] / 256), y0 = Math.floor(a[1] / 256), y1 = Math.floor(b[1] / 256);
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) > 400) throw new Error("Area too large for building tiles");
+  const buildings: TileBuilding[] = [];
+  const roads: TileRoad[] = [];
+  const jobs: Promise<void>[] = [];
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      jobs.push((async () => {
+        const r = await fetch(url.replace("{z}", String(Z)).replace("{x}", String(tx)).replace("{y}", String(ty)));
+        if (!r.ok) return;
+        const tile = new VectorTile(new PbfReader(new Uint8Array(await r.arrayBuffer())));
+        const toLngLat = (p: P, extent: number): LngLat => pixelToLngLat([(tx + p.x / extent) * 256, (ty + p.y / extent) * 256], Z);
+        const bl = tile.layers.building;
+        for (let i = 0; bl && i < bl.length; i++) {
+          const f = bl.feature(i);
+          const tags: Record<string, string> = {};
+          for (const [k, v] of Object.entries(f.properties)) tags[k] = String(v);
+          for (const ring of f.loadGeometry()) {
+            // Exterior rings have positive area in tile coordinates; holes are skipped.
+            if (signedArea(ring) <= 0) continue;
+            const clipped = clipToTile(ring.slice(0, -1), bl.extent);
+            if (clipped.length >= 3) buildings.push({ ring: clipped.map((p) => toLngLat(p, bl.extent)), tags });
+          }
+        }
+        const tl = tile.layers.transportation;
+        for (let i = 0; tl && i < tl.length; i++) {
+          const f = tl.feature(i);
+          if (f.type !== 2) continue;
+          const cls = String(f.properties.class ?? "");
+          const surface = f.properties.surface !== undefined ? String(f.properties.surface) : undefined;
+          for (const line of f.loadGeometry()) roads.push({ pts: line.map((p) => toLngLat(p, tl.extent)), cls, surface });
+        }
+      })().catch(() => undefined));
+    }
+  }
+  await Promise.all(jobs);
+  return { buildings, roads };
+}
+
+/** Typical asphalt width by OpenMapTiles road class, metres. */
+const CLASS_WIDTH: Record<string, number> = {
+  motorway: 7.5, trunk: 7.5, primary: 7.5, secondary: 7, tertiary: 6.5, minor: 6, service: 4, track: 3.5, raceway: 10,
+};
+
+/** Road ways from the tiles as width-tagged lines, for when Overpass is down. */
+export function classWidths(roads: TileRoad[]): { width: number; pts: LngLat[] }[] {
+  return roads.filter((r) => CLASS_WIDTH[r.cls] !== undefined).map((r) => ({ width: CLASS_WIDTH[r.cls], pts: r.pts }));
+}

@@ -1,10 +1,10 @@
 // Roadside scenery: trees found in the aerial imagery, guard rails where the
-// ground falls away (or where OSM maps one), guide posts, and OSM buildings.
+// ground falls away (or where OSM maps one), and guide posts. Buildings
+// live in buildings.ts.
 //
-// Trees and posts are visual only. Guard rails and buildings are collidable
-// (their names start with 1WALL_).
+// Trees and posts are visual only. Guard rails are collidable (their names
+// start with 1WALL_).
 
-import earcut from "earcut";
 import type { HeightFn } from "./elevation";
 import type { Vec2 } from "./geo";
 import type { Kn5MeshNode } from "./kn5";
@@ -16,7 +16,7 @@ import type { TerrainChunk } from "./terrain";
 import { TREE_VARIANTS } from "./textures";
 import { pad } from "./roadMesh";
 
-function rng(seed: number): () => number {
+export function rng(seed: number): () => number {
   let s = seed >>> 0;
   return () => {
     s = (s + 0x6d2b79f5) >>> 0;
@@ -28,7 +28,7 @@ function rng(seed: number): () => number {
 }
 
 /** Splits mesh output into kn5-sized pieces as it grows. */
-class ChunkedMesh {
+export class ChunkedMesh {
   private current = new MeshBuilder();
   readonly done: MeshBuilder[] = [];
   constructor(private readonly perItem: number) {}
@@ -341,90 +341,4 @@ export function buildGuidePosts(plan: RoadPlan, opts: BuildOptions, needs: [bool
     }
   }
   return out.all().map((m, i) => m.toKn5(`GUIDEPOSTS_${pad(i)}`, "guidepost"));
-}
-
-/* ---------------- buildings ---------------- */
-
-export interface Building {
-  /** Local metres; first point not repeated at the end. */
-  ring: Vec2[];
-  height: number;
-}
-
-function ringArea(r: Vec2[]): number {
-  let a = 0;
-  for (let i = 0; i < r.length; i++) {
-    const p = r[i], q = r[(i + 1) % r.length];
-    a += p[0] * q[1] - q[0] * p[1];
-  }
-  return a / 2;
-}
-
-/** Height from OSM tags, metres. */
-export function buildingHeight(tags: Record<string, string>): number {
-  const h = parseFloat(tags.height ?? "");
-  if (h > 2) return Math.min(80, h);
-  const levels = parseFloat(tags["building:levels"] ?? "");
-  if (levels > 0) return Math.min(80, levels * 3 + 1);
-  const kind = tags.building ?? "yes";
-  if (/^(garage|garages|shed|carport|hut|cabin|roof)$/.test(kind)) return 3.5;
-  if (/^(house|detached|residential|semidetached_house|bungalow|farm)$/.test(kind)) return 6;
-  return 8;
-}
-
-export function filterBuildings(buildings: Building[], index: SegmentIndex, opts: BuildOptions): Building[] {
-  return buildings.filter((b) => {
-    if (b.ring.length < 3 || Math.abs(ringArea(b.ring)) < 6) return false;
-    return b.ring.every(([x, y]) => {
-      const n = index.nearest(x, y, opts.corridor);
-      if (!n) return false; // beyond the terrain corridor: nothing to stand on
-      return n.dist > index.at(n).width / 2 + opts.vergeWidth + 1.5 && n.dist < opts.corridor - 2;
-    });
-  });
-}
-
-/** Extruded footprints: collidable walls (one mesh set) and flat roofs (another). */
-export function buildBuildings(buildings: Building[], ground: HeightFn): { walls: Kn5MeshNode[]; roofs: Kn5MeshNode[] } {
-  const walls = new ChunkedMesh(0), roofs = new ChunkedMesh(0);
-  for (const b of buildings) {
-    const ring = ringArea(b.ring) < 0 ? b.ring.slice().reverse() : b.ring;
-    const hs = ring.map(([x, y]) => ground(x, y));
-    const base = Math.min(...hs) - 0.4;
-    const top = Math.max(...hs) + b.height;
-    const wm = walls.next(ring.length * 4);
-    let perim = 0;
-    for (let k = 0; k < ring.length; k++) {
-      const p = ring[k], q = ring[(k + 1) % ring.length];
-      const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
-      const n: Vec3 = [(q[1] - p[1]) / (len || 1), -(q[0] - p[0]) / (len || 1), 0];
-      const i = wm.vertexCount;
-      const u0 = perim / 4, u1 = (perim + len) / 4;
-      const v1 = (top - base) / 3;
-      wm.vertex([p[0], p[1], base], u0, v1);
-      wm.vertex([q[0], q[1], base], u1, v1);
-      wm.vertex([q[0], q[1], top], u1, 0);
-      wm.vertex([p[0], p[1], top], u0, 0);
-      for (let j = 0; j < 4; j++) wm.normals!.push(...n);
-      wm.quad(i, i + 1, i + 2, i + 3);
-      perim += len;
-    }
-    const rm = roofs.next(ring.length);
-    const flat = ring.flatMap((p) => p);
-    const tris = earcut(flat);
-    const i0 = rm.vertexCount;
-    for (const [x, y] of ring) {
-      rm.vertex([x, y, top], x / 6, -y / 6);
-      rm.normals!.push(0, 0, 1);
-    }
-    for (let t = 0; t < tris.length; t += 3) {
-      const [a, b2, c] = [tris[t], tris[t + 1], tris[t + 2]];
-      const cross = (ring[b2][0] - ring[a][0]) * (ring[c][1] - ring[a][1]) - (ring[b2][1] - ring[a][1]) * (ring[c][0] - ring[a][0]);
-      if (cross >= 0) rm.tri(i0 + a, i0 + b2, i0 + c);
-      else rm.tri(i0 + a, i0 + c, i0 + b2);
-    }
-  }
-  return {
-    walls: walls.all().map((m, i) => m.toKn5(`1WALL_BLD_${pad(i)}`, "facade")),
-    roofs: roofs.all().map((m, i) => m.toKn5(`ROOFS_${pad(i)}`, "roof")),
-  };
 }

@@ -54,6 +54,10 @@ export interface BuildOptions {
   guidePosts: boolean;
   /** Buildings from OSM footprints. */
   buildings: boolean;
+  /** Placeholder buildings where the aerial imagery shows a roof. */
+  detectBuildings: boolean;
+  /** Buildings are placed up to this far from the road, metres. */
+  buildingRadius: number;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -83,6 +87,8 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   guardRails: true,
   guidePosts: true,
   buildings: true,
+  detectBuildings: true,
+  buildingRadius: 250,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

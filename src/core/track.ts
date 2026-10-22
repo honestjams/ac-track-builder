@@ -3,7 +3,7 @@
 // tiles) and in Node tests (synthetic terrain).
 
 import { buildAiLine } from "./aiLine";
-import { BACKDROP_CHUNK, buildBackdropChunk, planBackdrop } from "./backdrop";
+import { BACKDROP_CHUNK, backdropHeight, buildBackdropChunk, planBackdrop } from "./backdrop";
 import { writeFastLaneAi } from "./aiSpline";
 import { outlinePng, previewPng, readme, slugify, surfacesIni, trackMap, uiTrackJson, type TrackMeta } from "./acFiles";
 import type { HeightFn } from "./elevation";
@@ -15,11 +15,11 @@ import { simplify } from "./polyline";
 import { applyElevation, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
 import { buildRoadMeshes, buildWalls } from "./roadMesh";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { asphaltTexture, facadeTexture, grassTexture, postTexture, railTexture, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { asphaltTexture, FACADES, facadeTexture, grassTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
-  buildBuildings, buildingHeight, buildGuardRails, buildGuidePosts, buildTrees, filterBuildings, filterTrees, railNeeds,
-  treeSpotsFromImagery, type Building, type TreeSpot,
+  buildGuardRails, buildGuidePosts, buildTrees, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
+import { buildBuildings, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
 
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
 export type Progress = (stage: string, fraction?: number) => void | Promise<void>;
@@ -45,6 +45,7 @@ export interface DataSources {
 }
 
 export interface OsmFeatures {
+  /** Footprints (first point not repeated) with OSM / vector tile tags. */
   buildings: { ring: LngLat[]; tags: Record<string, string> }[];
   guardRails: LngLat[][];
 }
@@ -68,6 +69,7 @@ export interface TrackResult {
     kn5Bytes: number;
     trees: number;
     buildings: number;
+    buildingsDetected: number;
     railMetres: number;
   };
 }
@@ -219,8 +221,13 @@ export async function buildTrack(
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
-  addScenery("facade.png", facadeTexture(), material("facade", "facade.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
-  addScenery("roof.png", roofTexture(), material("roof", "roof.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
+  for (const f of FACADES) {
+    addScenery(`facade_${f}.png`, facadeTexture(f), material(`facade_${f}`, `facade_${f}.png`, { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
+  }
+  for (const c of ROOF_COLOURS) {
+    addScenery(`roof_${c.name}.png`, roofTexture(c), material(`roof_${c.name}`, `roof_${c.name}.png`, { ambient: 0.45, diffuse: 0.45, specular: c.tile ? 0.05 : 0.25, exp: 25 }));
+  }
+  const detected: Building[] = [];
   const treeSpots: TreeSpot[] = [];
 
   const textured = new Set<string>();
@@ -238,7 +245,10 @@ export async function buildTrack(
       // Aerial photos carry their own light and shadow, so lean on ambient.
       materials.push(material(`${job.prefix}_${job.chunk.key}`, tex, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
       textured.add(job.chunk.key);
-      if (img.rgba && job.prefix === "terrain") treeSpots.push(...treeSpotsFromImagery(img.rgba, job.size, job.chunk, opts.trees));
+      if (img.rgba && job.prefix === "terrain") {
+        treeSpots.push(...treeSpotsFromImagery(img.rgba, job.size, job.chunk, opts.trees));
+        if (opts.buildings && opts.detectBuildings) detected.push(...detectBuildings(img.rgba, job.size, job.chunk));
+      }
     }
   }
 
@@ -265,11 +275,16 @@ export async function buildTrack(
   if (!opts.guardRails) needs.forEach((side) => side.fill(false));
   const rails = buildGuardRails(plan, opts, needs);
   const posts = opts.guidePosts ? buildGuidePosts(plan, opts, needs) : [];
-  const footprints: Building[] = opts.buildings
-    ? (sources.osm?.buildings ?? []).map((b) => ({ ring: b.ring.map((p) => proj.toLocal(p)), height: buildingHeight(b.tags) }))
+  const mapped: Building[] = opts.buildings
+    ? (sources.osm?.buildings ?? []).map((b, i) => fromOsm(b.ring.map((p) => proj.toLocal(p)), b.tags, i))
     : [];
-  const kept = filterBuildings(footprints, index, opts);
-  const houses = buildBuildings(kept, ground);
+  const kept = filterBuildings([...mapped, ...detected], index, opts, opts.buildingRadius);
+  // Inside the corridor buildings stand on the detailed terrain; further out, on the horizon mesh.
+  const buildingGround = (x: number, y: number) => {
+    const n = index.nearest(x, y, opts.corridor - 1);
+    return n ? ground(x, y) : backdropHeight(farDem, index, opts, x, y) - 0.6;
+  };
+  const houses = buildBuildings(opts.horizon > 0 ? kept : kept.filter((b) => b.ring.every(([x, y]) => index.nearest(x, y, opts.corridor - 1))), buildingGround);
 
   const group = (name: string, children: Kn5Node[]): Kn5GroupNode => ({ kind: "node", name, transform: IDENTITY, children });
   const slug = slugify(opts.name);
@@ -285,7 +300,7 @@ export async function buildTrack(
       group("TREES", trees),
       group("RAILS", [...rails.rails, ...rails.posts]),
       group("GUIDEPOSTS", posts),
-      group("BUILDINGS", [...houses.walls, ...houses.roofs]),
+      group("BUILDINGS", houses),
       ...trackObjects(plan, opts),
     ]),
   };
@@ -332,6 +347,7 @@ export async function buildTrack(
       kn5Bytes: kn5.length,
       trees: trees.reduce((n, m) => n + (m.kind === "mesh" ? m.positions.length / 3 / 24 : 0), 0),
       buildings: kept.length,
+      buildingsDetected: kept.filter((b) => b.source === "detected").length,
       railMetres: needs.reduce((n, side) => n + side.filter(Boolean).length * opts.spacing, 0),
     },
   };
