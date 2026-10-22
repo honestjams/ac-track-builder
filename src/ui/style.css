@@ -82,6 +82,7 @@ button:not(:disabled):hover, .button:hover { border-color: #444b5a; }
 .field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12.5px; min-width: 0; }
 .field input, .field select { width: 100%; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.checks { display: flex; flex-direction: column; gap: 4px; justify-content: center; }
 details summary { cursor: pointer; color: var(--muted); margin: 2px 0 10px; }
 
 .search { position: relative; }

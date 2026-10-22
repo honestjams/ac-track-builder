@@ -96,7 +96,7 @@ export async function loadChunkImagery(
   size: number,
   previews: Map<string, OffscreenCanvas>,
   source: keyof typeof IMAGERY = "esri",
-): Promise<{ data: Uint8Array; ext: "dds" } | null> {
+): Promise<{ data: Uint8Array; ext: "dds"; rgba: Uint8ClampedArray } | null> {
   const src = IMAGERY[source];
   const z = Math.min(src.maxZoom, zoom);
   const p0 = proj.localToPixel([chunk.minX, chunk.maxY], z);
@@ -126,5 +126,5 @@ export async function loadChunkImagery(
   if (!any) return null;
   previews.set(chunk.key, canvas);
   const rgba = ctx.getImageData(0, 0, size, size).data;
-  return { data: encodeDdsDxt1(rgba, size, size), ext: "dds" };
+  return { data: encodeDdsDxt1(rgba, size, size), ext: "dds", rgba };
 }

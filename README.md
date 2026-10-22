@@ -20,6 +20,9 @@ everything runs client-side: no server, no account, no queue.
   each side of the road textured with aerial imagery.
 - Low-detail horizon terrain out to 1.5 km so the world doesn't end at the
   roadside.
+- Scenery: trees wherever the aerial imagery shows tree canopy, guard rails
+  where the ground drops away beside the road (or where OSM maps one), white
+  guide posts, and buildings extruded from OSM footprints.
 - Invisible walls that keep you on the road and pull in where switchbacks
   pass close to each other.
 - Pit boxes, a starting grid, hotlap start, A-to-B start/finish timing (or a
@@ -48,7 +51,7 @@ up nested too deep.
 ```
 pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Mercator)
                                    │
-            Overpass (OSM widths) ─┤
+  Overpass (widths, rails, buildings) ─┤
                                    ▼
                      smoothed centreline, sampled every 2 m
                      width · banking · crown
@@ -72,6 +75,7 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/road.ts`, `polyline.ts` | Centreline smoothing, widths, banking, nearest-point index |
 | `src/core/roadMesh.ts` | Road, verge and wall meshes |
 | `src/core/terrain.ts`, `backdrop.ts` | Drivable terrain corridor and horizon scenery |
+| `src/core/scenery.ts` | Trees from imagery, guard rails, guide posts, OSM buildings |
 | `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
 | `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |
 | `src/core/track.ts` | The whole pipeline; network access is injected |

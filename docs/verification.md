@@ -26,7 +26,10 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 9 | The in-game map (F-key apps / map app) shows the road in the right place | `data/map.ini` offsets and `SCALE_FACTOR` |
 | 10 | AI cars drive the road (Race / Track Day with AI) | `ai/fast_lane.ai`; see note below |
 | 11 | Horizon hills show and there's no visible ledge where they meet the near terrain | `src/core/backdrop.ts` `SINK` |
-| 12 | Performance is fine (FPS similar to a Kunos track) | chunk sizes, texture size |
+| 12 | Performance is fine (FPS similar to a Kunos track) | chunk sizes, texture size, `maxTrees` |
+| 13 | Trees show cut-out foliage (not solid rectangles), lit on both sides | `trees` material: `ksPerPixelAT`, alpha-tested |
+| 14 | Guard rails stop the car and sit on the verge, not floating or buried | `1WALL_RAIL_*`, `buildGuardRails` |
+| 15 | Buildings stand on the ground and are solid | `1WALL_BLD_*`, `buildBuildings` |
 
 ## Known unknowns
 
@@ -37,4 +40,6 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 - **Map scale.** Tracks under about 2 km across use `SCALE_FACTOR=1`, which
   is unambiguous. Longer roads scale the image down; if their in-game map
   marker drifts, the scale is the wrong way round.
+- **Trees are not solid.** You can drive through them. The invisible walls
+  keep you within 10 m of the road by default, which covers most of them.
 - **CSP.** Nothing needs Custom Shaders Patch, but it improves lighting.

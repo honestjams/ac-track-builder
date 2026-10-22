@@ -15,7 +15,11 @@ import { simplify } from "./polyline";
 import { applyElevation, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
 import { buildRoadMeshes, buildWalls } from "./roadMesh";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { asphaltTexture, grassTexture, solidTexture, vergeTexture } from "./textures";
+import { asphaltTexture, facadeTexture, grassTexture, postTexture, railTexture, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import {
+  buildBuildings, buildingHeight, buildGuardRails, buildGuidePosts, buildTrees, filterBuildings, filterTrees, railNeeds,
+  treeSpotsFromImagery, type Building, type TreeSpot,
+} from "./scenery";
 
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
 export type Progress = (stage: string, fraction?: number) => void | Promise<void>;
@@ -23,12 +27,26 @@ export type Progress = (stage: string, fraction?: number) => void | Promise<void
 export interface DataSources {
   /** Height sampler (local metres) covering `bounds`. */
   dem(proj: LocalProjection, bounds: Bounds, zoom: number): Promise<HeightFn>;
-  /** Image bytes (PNG or JPEG) covering the chunk square, north up; null to fall back to grass. */
-  imagery?(proj: LocalProjection, chunk: TerrainChunk, zoom: number, size: number): Promise<{ data: Uint8Array; ext: "png" | "jpg" | "dds" } | null>;
+  /**
+   * Image bytes (PNG, JPEG or DDS) covering the chunk square, north up; null
+   * to fall back to grass. `rgba` (size x size) lets the build find trees.
+   */
+  imagery?(proj: LocalProjection, chunk: TerrainChunk, zoom: number, size: number): Promise<{
+    data: Uint8Array;
+    ext: "png" | "jpg" | "dds";
+    rgba?: Uint8Array | Uint8ClampedArray;
+  } | null>;
+  /** OSM features near the road, already fetched. */
+  osm?: OsmFeatures;
   /** Asphalt width at a point from map data, metres. */
   widthAt?(p: LngLat): number | undefined;
   /** Credit line for the imagery source, written into the README. */
   imageryCredit?: string;
+}
+
+export interface OsmFeatures {
+  buildings: { ring: LngLat[]; tags: Record<string, string> }[];
+  guardRails: LngLat[][];
 }
 
 export interface TrackResult {
@@ -48,6 +66,9 @@ export interface TrackResult {
     triangles: number;
     terrainChunks: number;
     kn5Bytes: number;
+    trees: number;
+    buildings: number;
+    railMetres: number;
   };
 }
 
@@ -186,6 +207,21 @@ export async function buildTrack(
     material("grass", "grass.png", { ambient: 0.45, diffuse: 0.4, specular: 0, exp: 1 }),
     material("wall", "wall.png", { ambient: 0.4, diffuse: 0.4, specular: 0, exp: 1 }),
   ];
+  const addScenery = (tex: string, data: Uint8Array, mat: Kn5Material) => {
+    textures.push({ name: tex, data });
+    materials.push(mat);
+  };
+  addScenery("trees.png", treeAtlas(), {
+    ...material("trees", "trees.png", { ambient: 0.55, diffuse: 0.35, specular: 0, exp: 1 }),
+    shader: "ksPerPixelAT",
+    alphaTested: true,
+  });
+  addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
+  addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
+  addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
+  addScenery("facade.png", facadeTexture(), material("facade", "facade.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
+  addScenery("roof.png", roofTexture(), material("roof", "roof.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
+  const treeSpots: TreeSpot[] = [];
 
   const textured = new Set<string>();
   if (sources.imagery && opts.imageryZoom > 0) {
@@ -202,6 +238,7 @@ export async function buildTrack(
       // Aerial photos carry their own light and shadow, so lean on ambient.
       materials.push(material(`${job.prefix}_${job.chunk.key}`, tex, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
       textured.add(job.chunk.key);
+      if (img.rgba && job.prefix === "terrain") treeSpots.push(...treeSpotsFromImagery(img.rgba, job.size, job.chunk, opts.trees));
     }
   }
 
@@ -218,7 +255,21 @@ export async function buildTrack(
     const mesh = buildBackdropChunk(chunk, farDem, index, opts, textured.has(chunk.key));
     if (mesh) backdropNodes.push(mesh);
   }
-  const walls = buildWalls(plan, opts, (x, y) => terrainAt(x, y).h, index);
+  const ground = (x: number, y: number) => terrainAt(x, y).h;
+  const walls = buildWalls(plan, opts, ground, index);
+
+  await progress("Placing scenery");
+  const trees = buildTrees(filterTrees(treeSpots, index, opts, opts.maxTrees), ground);
+  const osmRails = opts.guardRails ? (sources.osm?.guardRails ?? []).map((l) => l.map((p) => proj.toLocal(p))) : [];
+  const needs = railNeeds(plan, opts, ground, osmRails, index);
+  if (!opts.guardRails) needs.forEach((side) => side.fill(false));
+  const rails = buildGuardRails(plan, opts, needs);
+  const posts = opts.guidePosts ? buildGuidePosts(plan, opts, needs) : [];
+  const footprints: Building[] = opts.buildings
+    ? (sources.osm?.buildings ?? []).map((b) => ({ ring: b.ring.map((p) => proj.toLocal(p)), height: buildingHeight(b.tags) }))
+    : [];
+  const kept = filterBuildings(footprints, index, opts);
+  const houses = buildBuildings(kept, ground);
 
   const group = (name: string, children: Kn5Node[]): Kn5GroupNode => ({ kind: "node", name, transform: IDENTITY, children });
   const slug = slugify(opts.name);
@@ -231,6 +282,10 @@ export async function buildTrack(
       group("TERRAIN", terrainNodes),
       group("WALLS", walls),
       group("HORIZON", backdropNodes),
+      group("TREES", trees),
+      group("RAILS", [...rails.rails, ...rails.posts]),
+      group("GUIDEPOSTS", posts),
+      group("BUILDINGS", [...houses.walls, ...houses.roofs]),
       ...trackObjects(plan, opts),
     ]),
   };
@@ -275,6 +330,9 @@ export async function buildTrack(
       triangles: geo.t,
       terrainChunks: terrainNodes.length,
       kn5Bytes: kn5.length,
+      trees: trees.reduce((n, m) => n + (m.kind === "mesh" ? m.positions.length / 3 / 24 : 0), 0),
+      buildings: kept.length,
+      railMetres: needs.reduce((n, side) => n + side.filter(Boolean).length * opts.spacing, 0),
     },
   };
 }

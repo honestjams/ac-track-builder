@@ -55,7 +55,12 @@ export async function createPreview(
     const texName = m.textures.txDiffuse;
     const chunkKey = /^(terrain|backdrop)_/.test(m.name) ? m.name.slice(m.name.indexOf("_") + 1) : undefined;
     const map = await textureFrom(textures.get(texName), chunkKey ? chunkImages.get(chunkKey) : undefined);
-    materials.set(m.name, new THREE.MeshLambertMaterial({ map, color: map ? 0xffffff : 0x6b7a4a }));
+    materials.set(m.name, new THREE.MeshLambertMaterial({
+      map,
+      color: map ? 0xffffff : 0x6b7a4a,
+      // Foliage sprites: cut out by alpha, like ksPerPixelAT in game.
+      ...(m.alphaTested ? { alphaTest: 0.5 } : {}),
+    }));
   }
 
   const meshes: THREE.Mesh[] = [];
@@ -95,9 +100,9 @@ export async function createPreview(
   controls.maxPolarAngle = Math.PI * 0.495;
 
   const startView = () => {
-    // From above and behind the start, looking ~80 m up the road.
-    const s = plan.samples[0], ahead = plan.samples[Math.min(plan.samples.length - 1, 40)];
-    const eye = toAc(s.pos[0] - s.tan[0] * 25, s.pos[1] - s.tan[1] * 25, s.h + 12);
+    // Above the treetops behind the start, looking ~200 m up the road.
+    const s = plan.samples[0], ahead = plan.samples[Math.min(plan.samples.length - 1, 100)];
+    const eye = toAc(s.pos[0] - s.tan[0] * 40, s.pos[1] - s.tan[1] * 40, s.h + 35);
     camera.position.set(...eye);
     controls.target.set(...toAc(ahead.pos[0], ahead.pos[1], ahead.h));
     controls.update();

@@ -164,3 +164,105 @@ export class Raster {
     return encodePng(this.px, this.width, this.height);
   }
 }
+
+/* ---------------- scenery textures ---------------- */
+
+/** Tree atlas variants: u ranges within the 512 x 512 atlas. */
+export const TREE_VARIANTS = [
+  { u0: 0, u1: 0.5, kind: "broadleaf" },
+  { u0: 0.5, u1: 1, kind: "conifer" },
+] as const;
+
+/**
+ * Two tree sprites side by side with an alpha channel, for alpha-tested
+ * crossed-quad trees: an open eucalypt/broadleaf canopy and a conifer.
+ */
+export function treeAtlas(): Uint8Array {
+  const w = 512, h = 512;
+  const px = new Uint8Array(w * h * 4);
+  const r = rng(41);
+  const put = (x: number, y: number, c: [number, number, number]) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return;
+    const i = (Math.floor(y) * w + Math.floor(x)) * 4;
+    px[i] = c[0];
+    px[i + 1] = c[1];
+    px[i + 2] = c[2];
+    px[i + 3] = 255;
+  };
+  const blob = (cx: number, cy: number, rad: number, shade: number, x0: number, x1: number) => {
+    for (let y = cy - rad; y <= cy + rad; y++) {
+      for (let x = Math.max(x0, cx - rad); x <= Math.min(x1 - 1, cx + rad); x++) {
+        const d = Math.hypot(x - cx, y - cy) / rad;
+        if (d > 1 || r() < d * d * 0.55) continue; // ragged, see-through edges
+        const k = shade * (0.75 + 0.35 * (1 - d)) * (0.85 + r() * 0.3);
+        put(x, y, [34 * k + 8, 70 * k + 14, 30 * k + 6]);
+      }
+    }
+  };
+  // Broadleaf: trunk with a couple of branches, clumped canopy.
+  for (let y = 330; y < 512; y++) {
+    const t = 3.5 + (512 - y) * 0.008;
+    for (let x = 128 - t; x < 128 + t; x++) put(x, y, [92 + r() * 25, 78 + r() * 20, 62 + r() * 15]);
+  }
+  for (let i = 0; i < 110; i++) {
+    const a = r() * Math.PI * 2, d = Math.sqrt(r());
+    blob(128 + Math.cos(a) * d * 92, 215 + Math.sin(a) * d * 150, 16 + r() * 24, 0.7 + r() * 0.6, 0, 256);
+  }
+  // Conifer: narrow trunk, stacked tiers.
+  for (let y = 380; y < 512; y++) for (let x = 378; x < 390; x++) put(x, y, [78 + r() * 20, 60 + r() * 15, 45]);
+  for (let tier = 0; tier < 9; tier++) {
+    const y = 40 + tier * 40, half = 18 + tier * 11;
+    for (let i = 0; i < 26; i++) {
+      const x = 384 + (r() * 2 - 1) * half;
+      blob(x, y + r() * 30, 10 + r() * 10, 0.55 + r() * 0.45, 256, 512);
+    }
+  }
+  return encodePng(px, w, h);
+}
+
+/** W-beam guard rail, 1 m along (u) by the beam height (v). */
+export function railTexture(): Uint8Array {
+  const w = 64, h = 64;
+  const r = rng(51);
+  return encodePng(fill(w, h, (_x, y) => {
+    // Two raised ridges and a central groove.
+    const v = y / h;
+    const shade = 150 + 45 * Math.cos(v * Math.PI * 4) + (r() - 0.5) * 12;
+    return [shade, shade + 2, shade + 6];
+  }), w, h, { alpha: false });
+}
+
+/** Guide post: white with a black band near the top and a reflector. */
+export function postTexture(): Uint8Array {
+  const w = 16, h = 64;
+  return encodePng(fill(w, h, (x, y) => {
+    if (y < 6) return [30, 30, 30];
+    if (y >= 8 && y < 16) return x < 8 ? [230, 40, 30] : [240, 170, 30];
+    if (y < 22) return [25, 25, 25];
+    return [232, 232, 226];
+  }), w, h, { alpha: false });
+}
+
+/** Facade: one storey (3 m) tall, 4 m wide, with a window. */
+export function facadeTexture(): Uint8Array {
+  const w = 128, h = 96;
+  const r = rng(61);
+  return encodePng(fill(w, h, (x, y) => {
+    const win = x > 30 && x < 98 && y > 22 && y < 70;
+    if (win) {
+      const g = 60 + (y - 22) * 0.8 + r() * 8;
+      return [g * 0.7, g * 0.82, g];
+    }
+    const k = 196 + (r() - 0.5) * 16;
+    return [k, k * 0.95, k * 0.86];
+  }), w, h, { alpha: false });
+}
+
+export function roofTexture(): Uint8Array {
+  const w = 64, h = 64;
+  const r = rng(71);
+  return encodePng(fill(w, h, () => {
+    const k = 95 + (r() - 0.5) * 20;
+    return [k * 1.05, k * 0.95, k * 0.9];
+  }), w, h, { alpha: false });
+}

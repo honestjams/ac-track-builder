@@ -5,7 +5,7 @@ import type { LngLat } from "../core/geo";
 import { buildTrack, type TrackResult } from "../core/track";
 import { zipTrack } from "../core/zip";
 import type { BuildOptions } from "../core/options";
-import { reverseGeocode, roadWidths, route, searchPlaces, type Place, type Route } from "../services/osm";
+import { fetchOsm, reverseGeocode, route, searchPlaces, type Place, type Route } from "../services/osm";
 import { IMAGERY, loadChunkImagery, loadDem } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
 
@@ -348,6 +348,10 @@ function readOptions(): Partial<BuildOptions> {
     banking: $<HTMLInputElement>("banking").checked,
     imageryZoom: imagery === "off" ? 0 : imagery === "high" ? 19 : 18,
     textureSize: imagery === "high" ? 1024 : 512,
+    trees: imagery === "off" ? 0 : num("trees"),
+    guardRails: $<HTMLInputElement>("guardRails").checked,
+    guidePosts: $<HTMLInputElement>("guidePosts").checked,
+    buildings: $<HTMLInputElement>("buildings").checked,
   };
 }
 
@@ -360,11 +364,12 @@ function setProgress(text: string, fraction?: number): void {
 
 // Overall bar: each stage owns a slice.
 const STAGES: Record<string, [number, number]> = {
-  "Looking up road widths": [0, 0.05],
+  "Fetching OpenStreetMap data": [0, 0.05],
   "Laying out the road": [0.05, 0.08],
   "Fetching elevation": [0.08, 0.2],
   "Fetching aerial imagery": [0.2, 0.75],
-  "Building road and terrain meshes": [0.75, 0.9],
+  "Building road and terrain meshes": [0.75, 0.88],
+  "Placing scenery": [0.88, 0.9],
   "Writing track files": [0.9, 0.95],
   "Rendering preview": [0.95, 0.98],
   Done: [1, 1],
@@ -389,12 +394,14 @@ $("build").onclick = async () => {
     await nextFrame();
   };
   try {
-    await report("Looking up road widths");
-    const widthAt = opts.widthOverride ? undefined : await roadWidths(current.coords);
+    await report("Fetching OpenStreetMap data");
+    const osm = await fetchOsm(current.coords, opts.corridor ?? 90, !!opts.buildings);
+    const widthAt = opts.widthOverride ? undefined : osm.widthAt;
     const result = await buildTrack(current.coords, opts, {
       dem: (proj, bounds, z) => loadDem(proj, bounds, z),
       imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages) : undefined,
       widthAt,
+      osm: osm.features,
       imageryCredit: IMAGERY.esri.credit,
     }, placeMeta, report);
 
@@ -437,6 +444,9 @@ function showStats(r: TrackResult, widthFallback: boolean): void {
     ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m`],
     ["Climb", `${Math.round(s.climb)} m`],
     ["Avg width", `${s.meanWidth.toFixed(1)} m${widthFallback ? " (default)" : ""}`],
+    ["Trees", s.trees.toLocaleString()],
+    ["Buildings", s.buildings.toLocaleString()],
+    ["Guard rail", `${Math.round(s.railMetres)} m`],
     ["Triangles", s.triangles.toLocaleString()],
   ];
   $("result-stats").innerHTML = rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");

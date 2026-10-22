@@ -3,6 +3,7 @@
 // the app, as their usage policies ask.
 
 import type { LngLat } from "../core/geo";
+import type { OsmFeatures } from "../core/track";
 
 const OSRM = "https://router.project-osrm.org";
 const PHOTON = "https://photon.komoot.io/api/";
@@ -94,46 +95,77 @@ interface Way {
   pts: LngLat[];
 }
 
+interface OverpassWay {
+  type: string;
+  tags?: Record<string, string>;
+  geometry?: { lat: number; lon: number }[];
+}
+
+export interface OsmData {
+  /** Asphalt width at a point; undefined when Overpass was unreachable. */
+  widthAt?: (p: LngLat) => number | undefined;
+  features: OsmFeatures;
+}
+
 /**
- * Width lookup along the route from the OSM ways under it. Resolves to
- * undefined when every Overpass mirror is unreachable; the build then uses
- * the default width.
+ * One Overpass query for everything the build uses from OSM along the route:
+ * the road ways (for widths), guard rails, and building footprints within
+ * `radius` metres. Every public mirror is asked at once and the first good
+ * answer wins; if all fail, the build goes ahead with defaults and no
+ * buildings.
  */
-export async function roadWidths(routeCoords: LngLat[]): Promise<((p: LngLat) => number | undefined) | undefined> {
+export async function fetchOsm(routeCoords: LngLat[], radius: number, wantBuildings: boolean): Promise<OsmData> {
   const step = Math.max(1, Math.ceil(routeCoords.length / 180));
   const sampled = routeCoords.filter((_, i) => i % step === 0 || i === routeCoords.length - 1);
   const around = sampled.map((p) => `${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(",");
-  const query = `[out:json][timeout:25];way(around:12,${around})[highway];out tags geom;`;
-  // Ask every mirror at once and take the first good answer; public Overpass
-  // instances are often slow or down.
+  const query = `[out:json][timeout:40];(
+    way(around:12,${around})[highway];
+    way(around:15,${around})[barrier=guard_rail];
+    ${wantBuildings ? `way(around:${Math.round(radius)},${around})[building];` : ""}
+  );out tags geom;`;
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 15000);
-  let ways: Way[] | undefined;
+  const timer = setTimeout(() => ctl.abort(), 45000);
+  let elements: OverpassWay[] | undefined;
   try {
-    ways = await Promise.any(OVERPASS.map(async (url) => {
+    elements = await Promise.any(OVERPASS.map(async (url) => {
       const r = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }), signal: ctl.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const body = await r.json();
-      return (body.elements ?? [])
-        .filter((e: { type: string; geometry?: unknown }) => e.type === "way" && e.geometry)
-        .map((e: { tags: Record<string, string>; geometry: { lat: number; lon: number }[] }) => ({
-          width: wayWidth(e.tags ?? {}),
-          pts: e.geometry.map((g) => [g.lon, g.lat] as LngLat),
-        }))
-        .filter((w: { width?: number }) => w.width !== undefined) as Way[];
+      return ((body.elements ?? []) as OverpassWay[]).filter((e) => e.type === "way" && e.geometry);
     }));
   } catch {
-    // every mirror failed: fall back to the default width
+    // every mirror failed
   } finally {
     clearTimeout(timer);
     ctl.abort();
   }
-  if (!ways?.length) return undefined;
-  const found = ways;
-  const kx = Math.cos((routeCoords[0][1] * Math.PI) / 180) * 111320, ky = 111320;
+  const features: OsmFeatures = { buildings: [], guardRails: [] };
+  if (!elements) return { features };
+
+  const ways: Way[] = [];
+  for (const e of elements) {
+    const tags = e.tags ?? {};
+    const pts = e.geometry!.map((g) => [g.lon, g.lat] as LngLat);
+    if (tags.building) {
+      // closed ways only; drop the repeated last point
+      if (pts.length >= 4 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) {
+        features.buildings.push({ ring: pts.slice(0, -1), tags });
+      }
+    } else if (tags.barrier === "guard_rail") {
+      features.guardRails.push(pts);
+    } else if (tags.highway) {
+      const width = wayWidth(tags);
+      if (width !== undefined) ways.push({ width, pts });
+    }
+  }
+  return { features, widthAt: ways.length ? widthLookup(ways, routeCoords[0][1]) : undefined };
+}
+
+function widthLookup(ways: Way[], lat: number): (p: LngLat) => number | undefined {
+  const kx = Math.cos((lat * Math.PI) / 180) * 111320, ky = 111320;
   return (p) => {
     let best: number | undefined, bestD = 12 * 12;
-    for (const w of found) {
+    for (const w of ways) {
       for (let i = 1; i < w.pts.length; i++) {
         const ax = (w.pts[i - 1][0] - p[0]) * kx, ay = (w.pts[i - 1][1] - p[1]) * ky;
         const bx = (w.pts[i][0] - p[0]) * kx, by = (w.pts[i][1] - p[1]) * ky;

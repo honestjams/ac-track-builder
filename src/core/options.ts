@@ -44,6 +44,16 @@ export interface BuildOptions {
   horizon: number;
   /** Aerial imagery zoom for the horizon terrain. */
   horizonZoom: number;
+  /** Trees from aerial imagery: 0 off, 1 normal, 2 dense. */
+  trees: number;
+  /** Upper bound on tree count, for frame rate. */
+  maxTrees: number;
+  /** Guard rails at drop-offs and where OSM maps them. */
+  guardRails: boolean;
+  /** White guide posts along the verges. */
+  guidePosts: boolean;
+  /** Buildings from OSM footprints. */
+  buildings: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -68,6 +78,11 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   demZoom: 14,
   horizon: 1500,
   horizonZoom: 16,
+  trees: 1,
+  maxTrees: 12000,
+  guardRails: true,
+  guidePosts: true,
+  buildings: true,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {
