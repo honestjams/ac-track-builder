@@ -14,8 +14,9 @@ import { withDefaults, type BuildOptions } from "./options";
 import { simplify } from "./polyline";
 import { applyElevation, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
 import { buildRoadMeshes, buildWalls } from "./roadMesh";
+import { buildMarkings } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { asphaltTexture, FACADES, facadeTexture, grassTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, grassTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
   buildGuardRails, buildGuidePosts, buildTrees, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
@@ -38,6 +39,8 @@ export interface DataSources {
   } | null>;
   /** OSM features near the road, already fetched. */
   osm?: OsmFeatures;
+  /** Road class at a point (OpenMapTiles: motorway, primary, minor, ...). */
+  roadClassAt?(p: LngLat): string | undefined;
   /** Asphalt width at a point from map data, metres. */
   widthAt?(p: LngLat): number | undefined;
   /** Credit line for the imagery source, written into the README. */
@@ -56,6 +59,8 @@ export interface TrackResult {
   model: Kn5Model;
   plan: RoadPlan;
   proj: LocalProjection;
+  /** Raw pixels for textures the browser can't decode (DDS), keyed by texture name. */
+  previewTextures: Record<string, { rgba: Uint8Array; width: number; height: number }>;
   stats: {
     length: number;
     closed: boolean;
@@ -196,15 +201,11 @@ export async function buildTrack(
   const chunks = planTerrainChunks(plan, index, opts);
   const backdrop = planBackdrop(plan, index, opts);
   const textures: Kn5Texture[] = [
-    { name: "road_2lane.png", data: asphaltTexture(true) },
-    { name: "road_1lane.png", data: asphaltTexture(false) },
     { name: "verge.png", data: vergeTexture() },
     { name: "grass.png", data: grassTexture() },
     { name: "wall.png", data: solidTexture([128, 128, 128]) },
   ];
   const materials: Kn5Material[] = [
-    material("road_2lane", "road_2lane.png", { ambient: 0.4, diffuse: 0.45, specular: 0.08, exp: 20 }),
-    material("road_1lane", "road_1lane.png", { ambient: 0.4, diffuse: 0.45, specular: 0.08, exp: 20 }),
     material("verge", "verge.png", { ambient: 0.45, diffuse: 0.4, specular: 0, exp: 1 }),
     material("grass", "grass.png", { ambient: 0.45, diffuse: 0.4, specular: 0, exp: 1 }),
     material("wall", "wall.png", { ambient: 0.4, diffuse: 0.4, specular: 0, exp: 1 }),
@@ -218,6 +219,8 @@ export async function buildTrack(
     shader: "ksPerPixelAT",
     alphaTested: true,
   });
+  addScenery("paint.png", paintTexture(), material("paint", "paint.png", { ambient: 0.5, diffuse: 0.5, specular: 0.1, exp: 15 }));
+  addScenery("rrpm.png", solidTexture([238, 238, 232]), material("rrpm", "rrpm.png", { ambient: 0.6, diffuse: 0.5, specular: 0.6, exp: 40 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
@@ -252,8 +255,38 @@ export async function buildTrack(
     }
   }
 
+  const mapped: Building[] = opts.buildings
+    ? (sources.osm?.buildings ?? []).map((b, i) => fromOsm(b.ring.map((p) => proj.toLocal(p)), b.tags, i))
+    : [];
+  const kept = filterBuildings([...mapped, ...detected], index, opts, opts.buildingRadius);
+
   await progress("Building road and terrain meshes");
-  const roadMeshes = buildRoadMeshes(plan, opts);
+  // Road surface per chunk: dense asphalt on major roads and in built-up
+  // areas, chip seal on rural roads (the usual Australian split).
+  const centres = kept.map((b) => b.ring[0]);
+  const previewTextures: TrackResult["previewTextures"] = {};
+  const surfaceMaterials = new Set<string>();
+  const roadMaterial = (ci: number, meanWidth: number, mid: RoadSample): string => {
+    let kind: SealKind;
+    if (opts.roadSurface !== "auto") kind = opts.roadSurface;
+    else {
+      const cls = sources.roadClassAt?.(proj.toLngLat(mid.pos));
+      const nearby = centres.filter(([x, y]) => Math.hypot(x - mid.pos[0], y - mid.pos[1]) < 150).length;
+      kind = /^(motorway|trunk|primary)/.test(cls ?? "") || nearby >= 8 ? "asphalt" : "chipseal";
+    }
+    const twoLane = meanWidth >= 5.5;
+    const name = `road_${kind}_${twoLane ? 2 : 1}_${ci % 3}`;
+    if (!surfaceMaterials.has(name)) {
+      surfaceMaterials.add(name);
+      const tex = sealTexture(kind, twoLane, ci % 3);
+      textures.push({ name: `${name}.dds`, data: tex.dds });
+      previewTextures[`${name}.dds`] = { rgba: tex.rgba, width: tex.width, height: tex.height };
+      materials.push(material(name, `${name}.dds`, { ambient: 0.4, diffuse: 0.45, specular: kind === "asphalt" ? 0.08 : 0.04, exp: 20 }));
+    }
+    return name;
+  };
+  const roadMeshes = buildRoadMeshes(plan, opts, roadMaterial);
+  const markings = opts.markings ? buildMarkings(plan, opts) : [];
   const terrainNodes: Kn5Node[] = [];
   for (const [i, chunk] of chunks.entries()) {
     await progress("Building road and terrain meshes", i / chunks.length);
@@ -275,10 +308,6 @@ export async function buildTrack(
   if (!opts.guardRails) needs.forEach((side) => side.fill(false));
   const rails = buildGuardRails(plan, opts, needs);
   const posts = opts.guidePosts ? buildGuidePosts(plan, opts, needs) : [];
-  const mapped: Building[] = opts.buildings
-    ? (sources.osm?.buildings ?? []).map((b, i) => fromOsm(b.ring.map((p) => proj.toLocal(p)), b.tags, i))
-    : [];
-  const kept = filterBuildings([...mapped, ...detected], index, opts, opts.buildingRadius);
   // Inside the corridor buildings stand on the detailed terrain; further out, on the horizon mesh.
   const buildingGround = (x: number, y: number) => {
     const n = index.nearest(x, y, opts.corridor - 1);
@@ -292,7 +321,8 @@ export async function buildTrack(
     textures,
     materials,
     root: group(slug, [
-      group("ROAD", roadMeshes.road.map((r) => r.mesh)),
+      group("ROAD", roadMeshes.road),
+      group("MARKINGS", markings),
       group("VERGE", roadMeshes.verge),
       group("TERRAIN", terrainNodes),
       group("WALLS", walls),
@@ -333,7 +363,7 @@ export async function buildTrack(
   const geo = countGeometry(model.root);
   await progress("Done", 1);
   return {
-    slug, files, model, plan, proj,
+    slug, files, model, plan, proj, previewTextures,
     stats: {
       length: plan.length,
       closed: plan.closed,

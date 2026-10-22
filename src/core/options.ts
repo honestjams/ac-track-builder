@@ -58,6 +58,10 @@ export interface BuildOptions {
   detectBuildings: boolean;
   /** Buildings are placed up to this far from the road, metres. */
   buildingRadius: number;
+  /** Road surface: by road class and surroundings, or one kind everywhere. */
+  roadSurface: "auto" | "asphalt" | "chipseal";
+  /** Edge lines, dividing lines and raised markers. */
+  markings: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -89,6 +93,8 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   buildings: true,
   detectBuildings: true,
   buildingRadius: 250,
+  roadSurface: "auto",
+  markings: true,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

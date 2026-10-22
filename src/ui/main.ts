@@ -8,7 +8,7 @@ import type { BuildOptions } from "../core/options";
 import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
 import { IMAGERY, loadChunkImagery, loadDem } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
-import { classWidths, fetchTileFeatures } from "../services/vectorTiles";
+import { classWidths, fetchTileFeatures, roadClassLookup } from "../services/vectorTiles";
 
 const MAX_KM = 30;
 
@@ -354,6 +354,8 @@ function readOptions(): Partial<BuildOptions> {
     guidePosts: $<HTMLInputElement>("guidePosts").checked,
     buildings: $<HTMLSelectElement>("buildings").value !== "off",
     detectBuildings: $<HTMLSelectElement>("buildings").value === "all",
+    roadSurface: $<HTMLSelectElement>("surface").value as BuildOptions["roadSurface"],
+    markings: $<HTMLInputElement>("markings").checked,
   };
 }
 
@@ -419,11 +421,12 @@ $("build").onclick = async () => {
       imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages) : undefined,
       widthAt,
       osm: osm.features,
+      roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
       imageryCredit: IMAGERY.esri.credit,
     }, placeMeta, report);
 
     await report("Rendering preview");
-    preview = await createPreview($<HTMLCanvasElement>("preview-canvas"), result.model, result.plan, chunkImages);
+    preview = await createPreview($<HTMLCanvasElement>("preview-canvas"), result.model, result.plan, chunkImages, result.previewTextures);
     try {
       const shot = await preview.snapshot(1024, 576);
       result.files[`${result.slug}/ui/preview.png`] = shot;

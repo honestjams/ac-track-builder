@@ -121,3 +121,26 @@ const CLASS_WIDTH: Record<string, number> = {
 export function classWidths(roads: TileRoad[]): { width: number; pts: LngLat[] }[] {
   return roads.filter((r) => CLASS_WIDTH[r.cls] !== undefined).map((r) => ({ width: CLASS_WIDTH[r.cls], pts: r.pts }));
 }
+
+/** Road class at a point: the nearest tile road within 12 m. */
+export function roadClassLookup(roads: TileRoad[], lat: number): (p: LngLat) => string | undefined {
+  const kx = Math.cos((lat * Math.PI) / 180) * 111320, ky = 111320;
+  const drivable = roads.filter((r) => CLASS_WIDTH[r.cls] !== undefined);
+  return (p) => {
+    let best: string | undefined, bestD = 12 * 12;
+    for (const r of drivable) {
+      for (let i = 1; i < r.pts.length; i++) {
+        const ax = (r.pts[i - 1][0] - p[0]) * kx, ay = (r.pts[i - 1][1] - p[1]) * ky;
+        const bx = (r.pts[i][0] - p[0]) * kx, by = (r.pts[i][1] - p[1]) * ky;
+        const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1e-9;
+        const t = Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2));
+        const d = (ax + dx * t) ** 2 + (ay + dy * t) ** 2;
+        if (d < bestD) {
+          bestD = d;
+          best = r.cls;
+        }
+      }
+    }
+    return best;
+  };
+}

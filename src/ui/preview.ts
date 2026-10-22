@@ -17,9 +17,17 @@ export interface PreviewScene {
   dispose(): void;
 }
 
-async function textureFrom(tex: Kn5Texture | undefined, canvas: OffscreenCanvas | undefined): Promise<THREE.Texture | null> {
+type RawImage = { rgba: Uint8Array; width: number; height: number };
+
+async function textureFrom(tex: Kn5Texture | undefined, canvas: OffscreenCanvas | undefined, raw?: RawImage): Promise<THREE.Texture | null> {
   let t: THREE.Texture | null = null;
   if (canvas) t = new THREE.CanvasTexture(canvas as unknown as HTMLCanvasElement);
+  else if (raw) {
+    t = new THREE.DataTexture(raw.rgba, raw.width, raw.height, THREE.RGBAFormat);
+    t.generateMipmaps = true;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+  }
   else if (tex && /\.png$/i.test(tex.name)) {
     const bmp = await createImageBitmap(new Blob([tex.data as BlobPart], { type: "image/png" }));
     t = new THREE.Texture(bmp as unknown as HTMLImageElement);
@@ -38,6 +46,7 @@ export async function createPreview(
   model: Kn5Model,
   plan: RoadPlan,
   chunkImages: Map<string, OffscreenCanvas>,
+  rawTextures: Record<string, RawImage> = {},
 ): Promise<PreviewScene> {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
@@ -54,7 +63,7 @@ export async function createPreview(
   for (const m of model.materials) {
     const texName = m.textures.txDiffuse;
     const chunkKey = /^(terrain|backdrop)_/.test(m.name) ? m.name.slice(m.name.indexOf("_") + 1) : undefined;
-    const map = await textureFrom(textures.get(texName), chunkKey ? chunkImages.get(chunkKey) : undefined);
+    const map = await textureFrom(textures.get(texName), chunkKey ? chunkImages.get(chunkKey) : undefined, rawTextures[texName]);
     materials.set(m.name, new THREE.MeshLambertMaterial({
       map,
       color: map ? 0xffffff : 0x6b7a4a,

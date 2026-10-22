@@ -2,6 +2,7 @@
 // depends on a texture download, and small raster drawing for map.png and
 // the Content Manager outline/preview images.
 
+import { encodeDdsDxt1 } from "./dds";
 import { encodePng } from "./png";
 
 function rng(seed: number): () => number {
@@ -50,31 +51,114 @@ function fill(w: number, h: number, shade: (x: number, y: number, i: number) => 
   return px;
 }
 
+export type SealKind = "asphalt" | "chipseal";
+
+/** Road surface texture repeats every this many metres along the road. */
+export const SEAL_LENGTH = 24;
+
 /**
- * Asphalt across the full road width (u 0..1, left to right) and 12 m along
- * it (v). White edge lines; a dashed centre line (3 m line, 9 m gap) on
- * two-lane roads.
+ * Bare road surface (no markings; those are separate geometry) across the
+ * full width (u 0..1, left to right) and SEAL_LENGTH metres along (v),
+ * tiling seamlessly along the road. RGBA, 512 x 1024.
+ *
+ *  - asphalt: dense-graded, dark and fine, with sealed cracks ("tar
+ *    snakes"), patch repairs, polished wheel paths and an oil-drip line
+ *    down each lane.
+ *  - chipseal: spray seal, the usual rural Australian surface: lighter,
+ *    coarse stone, with binder bleeding through darker in the wheel paths
+ *    and premix patches.
+ *
+ * Returned as DXT1 DDS (these are the largest textures on the road), plus
+ * the raw pixels for the browser preview.
  */
-export function asphaltTexture(twoLane: boolean): Uint8Array {
+export function sealTexture(kind: SealKind, twoLane: boolean, variant: number): { dds: Uint8Array; rgba: Uint8Array; width: number; height: number } {
   const w = 512, h = 1024;
-  const coarse = valueNoise(w, h, 8, 11), mid = valueNoise(w, h, 64, 12);
-  const r = rng(13);
-  const grain = Float32Array.from({ length: w * h }, r);
-  const px = fill(w, h, (x, y, i) => {
-    const u = x / w, v = y / h;
-    const base = 62 + (coarse[i] - 0.5) * 14 + (mid[i] - 0.5) * 10 + (grain[i] - 0.5) * 22;
-    const edge = (u > 0.018 && u < 0.036) || (u > 0.964 && u < 0.982);
-    const centre = twoLane && u > 0.491 && u < 0.509 && v < 0.25;
-    if (edge || centre) {
-      const paint = 205 + (grain[i] - 0.5) * 30 + (coarse[i] - 0.5) * 20;
-      return [paint, paint, paint - 4];
+  const seed = (kind === "asphalt" ? 100 : 200) + variant * 17 + (twoLane ? 5 : 0);
+  const r = rng(seed);
+  const coarse = valueNoise(w, h, 6, seed + 1), mid = valueNoise(w, h, 48, seed + 2), fine = valueNoise(w, h, 160, seed + 3);
+  // Wheel paths: two per lane, ~0.9 m either side of each lane's centre.
+  const lanes = twoLane ? [0.25, 0.75] : [0.5];
+  const laneW = twoLane ? 0.5 : 1;
+  const wheel = (u: number) => {
+    let best = 0;
+    for (const c of lanes) {
+      for (const o of [-0.26, 0.26]) best = Math.max(best, 1 - Math.min(1, Math.abs(u - (c + o * laneW)) / (0.09 * laneW)));
     }
-    // Darker wheel tracks where tyres polish the surface.
-    const lane = twoLane ? Math.min(Math.abs(u - 0.25), Math.abs(u - 0.75)) : Math.abs(u - 0.5);
-    const track = Math.max(0, 1 - Math.abs(lane - 0.12) / 0.05) * 6;
-    return [base - track, base - track, base - track + 2];
-  });
-  return encodePng(px, w, h, { alpha: false });
+    return best * best * (3 - 2 * best);
+  };
+  const drip = (u: number) => Math.max(...lanes.map((c) => 1 - Math.min(1, Math.abs(u - c) / (0.05 * laneW))));
+
+  const px = new Uint8Array(w * h * 4);
+  const stone: [number, number, number][] = [[112, 110, 106], [74, 73, 72], [122, 108, 92], [98, 102, 112], [136, 132, 124]];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x, u = x / w;
+      const wp = wheel(u);
+      let c: [number, number, number];
+      if (kind === "chipseal") {
+        const s = stone[Math.floor(r() * stone.length)];
+        const k = 0.85 + (coarse[i] - 0.5) * 0.25 + (mid[i] - 0.5) * 0.2 + (fine[i] - 0.5) * 0.35;
+        // Flushed binder in the wheel paths: darker and smoother.
+        const flush = wp * (0.35 + coarse[i] * 0.3);
+        c = [s[0] * k * (1 - flush) + 52 * flush, s[1] * k * (1 - flush) + 52 * flush, s[2] * k * (1 - flush) + 54 * flush];
+      } else {
+        const g = (r() - 0.5) * 20 * (1 - wp * 0.5);
+        const base = 60 + (coarse[i] - 0.5) * 12 + (mid[i] - 0.5) * 8 + (fine[i] - 0.5) * 10 + g - wp * 5 - drip(u) * 7 * mid[i];
+        c = [base, base, base + 2];
+      }
+      px.set([c[0], c[1], c[2], 255].map((v) => Math.max(0, Math.min(255, v))), i * 4);
+    }
+  }
+
+  const shade = (x: number, y: number, f: (c: number) => number) => {
+    const xx = Math.max(0, Math.min(w - 1, Math.floor(x)));
+    const yy = ((Math.floor(y) % h) + h) % h; // wrap along the road
+    const i = (yy * w + xx) * 4;
+    for (let k = 0; k < 3; k++) px[i + k] = Math.max(0, Math.min(255, f(px[i + k])));
+  };
+
+  // Patch repairs: rectangles within a lane, a new or faded tone with a sealed edge.
+  const patches = 1 + Math.floor(r() * 3);
+  for (let p = 0; p < patches; p++) {
+    const lane = lanes[Math.floor(r() * lanes.length)];
+    const pw = (0.15 + r() * 0.25) * laneW * w, ph = (1.5 + r() * 5) / SEAL_LENGTH * h;
+    const px0 = (lane - laneW * 0.4 + r() * laneW * 0.8) * w - pw / 2, py0 = r() * h;
+    const tone = kind === "chipseal" ? -30 - r() * 15 : r() < 0.6 ? -9 : 8;
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < pw; x++) {
+        const edge = x < 2 || y < 2 || x > pw - 3 || y > ph - 3;
+        shade(px0 + x, py0 + y, (c) => (edge ? c * 0.55 : c + tone + (r() - 0.5) * 6));
+      }
+    }
+  }
+
+  // Sealed cracks: dark meandering lines, mostly along the road, some across.
+  const cracks = kind === "asphalt" ? 4 + Math.floor(r() * 4) : 1 + Math.floor(r() * 2);
+  for (let c = 0; c < cracks; c++) {
+    const along = r() < 0.7;
+    let x = twoLane && c === 0 ? w * 0.5 : r() * w, y = r() * h;
+    let a = along ? Math.PI / 2 + (r() - 0.5) * 0.4 : (r() - 0.5) * 0.6;
+    const len = (along ? 200 + r() * 600 : 80 + r() * 200);
+    for (let t = 0; t < len; t++) {
+      a += (r() - 0.5) * 0.35;
+      if (along) a = Math.PI / 2 + Math.max(-0.5, Math.min(0.5, a - Math.PI / 2));
+      x += Math.cos(a);
+      y += Math.sin(a);
+      for (let dx = -1.5; dx <= 1.5; dx++) shade(x + dx, y, () => 26 + r() * 8);
+    }
+  }
+  return { dds: encodeDdsDxt1(px, w, h), rgba: px, width: w, height: h };
+}
+
+/** Road paint, slightly worn. Tiles every metre. */
+export function paintTexture(): Uint8Array {
+  const w = 64, h = 64;
+  const r = rng(301);
+  const wear = valueNoise(w, h, 8, 302);
+  return encodePng(fill(w, h, (_x, _y, i) => {
+    const k = 228 - Math.max(0, wear[i] - 0.6) * 160 + (r() - 0.5) * 18;
+    return [k, k, k - 3];
+  }), w, h, { alpha: false });
 }
 
 export function vergeTexture(): Uint8Array {

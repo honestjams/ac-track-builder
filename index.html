@@ -52,6 +52,13 @@
                 <option value="12">12 m · drift-wide</option>
               </select>
             </label>
+            <label class="field">Road surface
+              <select id="surface">
+                <option value="auto" selected>Auto (by road type)</option>
+                <option value="chipseal">Chip seal (rural)</option>
+                <option value="asphalt">Dense asphalt</option>
+              </select>
+            </label>
             <label class="field">Aerial imagery
               <select id="imagery">
                 <option value="high">High · 0.2 m/px</option>
@@ -99,6 +106,7 @@
               </select>
             </label>
             <div class="checks">
+              <label class="toggle"><input id="markings" type="checkbox" checked /> Line markings</label>
               <label class="toggle"><input id="guardRails" type="checkbox" checked /> Guard rails</label>
               <label class="toggle"><input id="guidePosts" type="checkbox" checked /> Guide posts</label>
             </div>

@@ -8,8 +8,7 @@ import type { BuildOptions } from "./options";
 import { surfaceHeight, type RoadPlan, type RoadSample, SegmentIndex } from "./road";
 import type { HeightFn } from "./elevation";
 
-/** Road texture repeats every this many metres along the road. */
-export const ROAD_TEXTURE_LENGTH = 12;
+import { SEAL_LENGTH } from "./textures";
 const VERGE_DROP = 0.2;
 const SKIRT_DEPTH = 0.8;
 const CHUNK_SECTIONS = 120;
@@ -28,11 +27,14 @@ function chunkRanges(plan: RoadPlan): [number, number][] {
 }
 
 export interface RoadMeshes {
-  road: { mesh: Kn5MeshNode; twoLane: boolean }[];
+  road: Kn5MeshNode[];
   verge: Kn5MeshNode[];
 }
 
-export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions): RoadMeshes {
+/** Picks the road material for chunk `ci` (mean width, middle sample). */
+export type RoadMaterialFn = (ci: number, meanWidth: number, mid: RoadSample) => string;
+
+export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions, materialFor: RoadMaterialFn): RoadMeshes {
   const samples = plan.samples;
   const n = samples.length;
   const at = (i: number) => samples[i % n];
@@ -48,7 +50,7 @@ export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions): RoadMeshes 
     for (let i = a; i <= b; i++) {
       const s = at(i);
       widthSum += s.width;
-      const v = sAt(i) / ROAD_TEXTURE_LENGTH;
+      const v = sAt(i) / SEAL_LENGTH;
       lanes.forEach((f, j) => {
         const t = f * s.width;
         rb.vertex(point(s, t, surfaceHeight(s, t, opts.crown)), j / (lanes.length - 1), v);
@@ -63,7 +65,7 @@ export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions): RoadMeshes 
       }
     }
     const meanWidth = widthSum / (b - a + 1);
-    road.push({ mesh: rb.toKn5(`1ROAD_${pad(ci)}`, meanWidth >= 5.5 ? "road_2lane" : "road_1lane"), twoLane: meanWidth >= 5.5 });
+    road.push(rb.toKn5(`1ROAD_${pad(ci)}`, materialFor(ci, meanWidth, at(Math.floor((a + b) / 2)))));
 
     if (opts.vergeWidth > 0) {
       const vb = new MeshBuilder();
