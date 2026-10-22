@@ -40,6 +40,10 @@ export interface BuildOptions {
   textureSize: number;
   /** Elevation tile zoom level. */
   demZoom: number;
+  /** Non-drivable horizon terrain out to this distance from the road, metres (0 = none). */
+  horizon: number;
+  /** Aerial imagery zoom for the horizon terrain. */
+  horizonZoom: number;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -62,6 +66,8 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   imageryZoom: 18,
   textureSize: 1024,
   demZoom: 14,
+  horizon: 1500,
+  horizonZoom: 16,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

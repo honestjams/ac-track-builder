@@ -62,7 +62,8 @@ describe("buildTrack (synthetic terrain)", async () => {
     const meshes = nodes.filter((n) => n.kind === "mesh");
     const names = nodes.map((n) => n.name);
     for (const m of meshes) {
-      expect(m.name).toMatch(/^1(ROAD|GRASS|WALL)_/);
+      // physical surfaces, or the non-collidable horizon
+      expect(m.name).toMatch(/^(1(ROAD|GRASS|WALL)_|BACKDROP_)/);
       if (m.kind !== "mesh") continue;
       expect(m.positions.every(Number.isFinite)).toBe(true);
       expect(m.normals.every(Number.isFinite)).toBe(true);
@@ -73,6 +74,7 @@ describe("buildTrack (synthetic terrain)", async () => {
       expect(names).toContain(required);
     }
     expect(names.filter((n) => n.startsWith("AC_PIT_"))).toHaveLength(8);
+    expect(meshes.some((m) => m.name.startsWith("BACKDROP_"))).toBe(true);
   });
 
   it("keeps the terrain below the asphalt", () => {

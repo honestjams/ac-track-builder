@@ -3,6 +3,7 @@
 // tiles) and in Node tests (synthetic terrain).
 
 import { buildAiLine } from "./aiLine";
+import { BACKDROP_CHUNK, buildBackdropChunk, planBackdrop } from "./backdrop";
 import { writeFastLaneAi } from "./aiSpline";
 import { outlinePng, previewPng, readme, slugify, surfacesIni, trackMap, uiTrackJson, type TrackMeta } from "./acFiles";
 import type { HeightFn } from "./elevation";
@@ -162,11 +163,15 @@ export async function buildTrack(
   await progress("Fetching elevation");
   const bounds = boundsOf(plan.samples.map((s) => s.pos), opts.corridor + opts.terrainBlend + 60);
   const dem = await sources.dem(proj, bounds, opts.demZoom);
+  // The horizon only needs coarse heights; a separate low-zoom DEM keeps the download small.
+  const farBounds = boundsOf(plan.samples.map((s) => s.pos), opts.horizon + BACKDROP_CHUNK);
+  const farDem = opts.horizon > 0 ? await sources.dem(proj, farBounds, Math.min(opts.demZoom, 12)) : dem;
   applyElevation(plan, dem, opts);
   const index = new SegmentIndex(plan);
   const terrainAt = makeTerrainFn(plan, index, dem, opts);
 
   const chunks = planTerrainChunks(plan, index, opts);
+  const backdrop = planBackdrop(plan, index, opts);
   const textures: Kn5Texture[] = [
     { name: "road_2lane.png", data: asphaltTexture(true) },
     { name: "road_1lane.png", data: asphaltTexture(false) },
@@ -184,17 +189,19 @@ export async function buildTrack(
 
   const textured = new Set<string>();
   if (sources.imagery && opts.imageryZoom > 0) {
-    let done = 0;
-    for (const chunk of chunks) {
-      await progress("Fetching aerial imagery", done / chunks.length);
-      const img = await sources.imagery(proj, chunk, opts.imageryZoom, opts.textureSize);
-      done++;
+    const jobs = [
+      ...chunks.map((c) => ({ chunk: c, zoom: opts.imageryZoom, size: opts.textureSize, prefix: "terrain" })),
+      ...backdrop.map((c) => ({ chunk: c, zoom: opts.horizonZoom, size: 512, prefix: "backdrop" })),
+    ];
+    for (const [done, job] of jobs.entries()) {
+      await progress("Fetching aerial imagery", done / jobs.length);
+      const img = await sources.imagery(proj, job.chunk, job.zoom, job.size);
       if (!img) continue;
-      const tex = `terrain_${chunk.key}.${img.ext}`;
+      const tex = `${job.prefix}_${job.chunk.key}.${img.ext}`;
       textures.push({ name: tex, data: img.data });
       // Aerial photos carry their own light and shadow, so lean on ambient.
-      materials.push(material(`terrain_${chunk.key}`, tex, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
-      textured.add(chunk.key);
+      materials.push(material(`${job.prefix}_${job.chunk.key}`, tex, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
+      textured.add(job.chunk.key);
     }
   }
 
@@ -205,6 +212,11 @@ export async function buildTrack(
     await progress("Building road and terrain meshes", i / chunks.length);
     const mesh = buildTerrainChunk(chunk, terrainAt, opts, textured.has(chunk.key));
     if (mesh) terrainNodes.push(mesh);
+  }
+  const backdropNodes: Kn5Node[] = [];
+  for (const chunk of backdrop) {
+    const mesh = buildBackdropChunk(chunk, farDem, index, opts, textured.has(chunk.key));
+    if (mesh) backdropNodes.push(mesh);
   }
   const walls = buildWalls(plan, opts, (x, y) => terrainAt(x, y).h, index);
 
@@ -218,6 +230,7 @@ export async function buildTrack(
       group("VERGE", roadMeshes.verge),
       group("TERRAIN", terrainNodes),
       group("WALLS", walls),
+      group("HORIZON", backdropNodes),
       ...trackObjects(plan, opts),
     ]),
   };

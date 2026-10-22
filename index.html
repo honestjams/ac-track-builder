@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Turn any real road into an Assetto Corsa track, in your browser." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111318'/%3E%3Cpath d='M6 24c5-1 4-9 10-10s5-8 10-8' stroke='%23f5c442' stroke-width='3.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <title>AC Track Builder</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside id="panel">
+        <header class="brand">
+          <h1>AC Track Builder</h1>
+          <p>Real roads → Assetto Corsa tracks</p>
+        </header>
+
+        <section class="step">
+          <div class="search">
+            <input id="search" type="search" placeholder="Search a road or town…" autocomplete="off" aria-label="Search for a place" />
+            <ul id="search-results" role="listbox" hidden></ul>
+          </div>
+        </section>
+
+        <section class="step">
+          <h2><span>1</span> Pick the road</h2>
+          <p class="hint" id="pin-hint">Click the map where the road starts, then where it finishes. More clicks extend the route through those points.</p>
+          <ol id="pins"></ol>
+          <div class="row buttons">
+            <button id="reverse" type="button" disabled>Reverse</button>
+            <label class="toggle"><input id="loop" type="checkbox" /> Loop back to start</label>
+            <button id="clear" type="button" disabled>Clear</button>
+          </div>
+          <div class="route-stats" id="route-stats" hidden>
+            <div><b id="route-length">–</b><small>routed length</small></div>
+            <div><b id="route-kind">–</b><small>layout</small></div>
+          </div>
+          <p class="error" id="route-error" hidden></p>
+        </section>
+
+        <section class="step">
+          <h2><span>2</span> Track settings</h2>
+          <label class="field">Track name <input id="name" type="text" maxlength="60" placeholder="Named after the road once routed" /></label>
+          <div class="grid2">
+            <label class="field">Road width
+              <select id="width">
+                <option value="0">Auto (OpenStreetMap)</option>
+                <option value="4">4 m · single lane</option>
+                <option value="6">6 m · narrow two-lane</option>
+                <option value="7">7 m · two-lane</option>
+                <option value="9">9 m · wide</option>
+                <option value="12">12 m · drift-wide</option>
+              </select>
+            </label>
+            <label class="field">Aerial imagery
+              <select id="imagery">
+                <option value="high">High · 0.2 m/px</option>
+                <option value="standard" selected>Standard · 0.4 m/px</option>
+                <option value="off">Off · grass texture</option>
+              </select>
+            </label>
+            <label class="field">Terrain each side
+              <select id="corridor">
+                <option value="50">50 m</option>
+                <option value="90" selected>90 m</option>
+                <option value="150">150 m</option>
+                <option value="250">250 m</option>
+              </select>
+            </label>
+            <label class="field">Horizon scenery
+              <select id="horizon">
+                <option value="0">Off</option>
+                <option value="1500" selected>1.5 km</option>
+                <option value="3000">3 km</option>
+              </select>
+            </label>
+            <label class="field">Invisible walls
+              <select id="walls">
+                <option value="5">5 m from edge</option>
+                <option value="10" selected>10 m from edge</option>
+                <option value="25">25 m from edge</option>
+                <option value="0">None</option>
+              </select>
+            </label>
+          </div>
+          <details>
+            <summary>Advanced</summary>
+            <div class="grid2">
+              <label class="field">Line smoothing (m) <input id="lineSmoothing" type="number" min="0" max="20" step="1" value="4" /></label>
+              <label class="field">Elevation smoothing (m) <input id="elevationSmoothing" type="number" min="0" max="80" step="1" value="15" /></label>
+              <label class="field">Pit boxes <input id="pitCount" type="number" min="1" max="24" step="1" value="8" /></label>
+              <label class="field">Verge width (m) <input id="vergeWidth" type="number" min="0" max="5" step="0.5" value="1.5" /></label>
+              <label class="toggle"><input id="banking" type="checkbox" checked /> Bank corners</label>
+            </div>
+          </details>
+        </section>
+
+        <section class="step">
+          <h2><span>3</span> Build</h2>
+          <button id="build" class="primary" type="button" disabled>Build track</button>
+          <div id="progress" hidden>
+            <div class="bar"><div id="progress-bar"></div></div>
+            <p id="progress-text"></p>
+          </div>
+          <p class="error" id="build-error" hidden></p>
+          <div id="result" hidden>
+            <dl id="result-stats"></dl>
+            <div class="row buttons">
+              <a id="download" class="button primary" download>Download .zip</a>
+              <button id="open-preview" type="button">3D preview</button>
+            </div>
+            <p class="hint">Drag the zip onto Content Manager and click Install, or unzip the folder into <code>assettocorsa/content/tracks/</code>.</p>
+          </div>
+        </section>
+
+        <footer class="credits">
+          Roads © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors ·
+          routing <a href="https://project-osrm.org" target="_blank" rel="noopener">OSRM</a> ·
+          elevation <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">Terrain Tiles</a> ·
+          imagery Esri World Imagery.<br />
+          Tracks with aerial imagery are for personal use. Not affiliated with Kunos Simulazioni.
+        </footer>
+      </aside>
+      <main id="map" aria-label="Map"></main>
+    </div>
+
+    <div id="preview" hidden>
+      <canvas id="preview-canvas"></canvas>
+      <div class="preview-bar">
+        <span>Drag to orbit · scroll to zoom · right-drag to pan</span>
+        <button id="preview-drive" type="button">Drive-through</button>
+        <button id="preview-close" type="button">Close</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
+</html>
