@@ -130,7 +130,8 @@ export function findLines(plan: RoadPlan, cands: Cand[], trusted: (i: number) =>
     }
     const taken: number[] = [];
     for (const [b] of [...bins].sort((x, y) => y[1] - x[1])) {
-      if (taken.some((t) => Math.abs(t - b) <= 3)) continue;
+      // Real lines are at least a metre apart (lane lines 2.8 m+, bike lanes 1.2 m+).
+      if (taken.some((t) => Math.abs(t - b) <= 8)) continue;
       const near = inWin.filter((c) => Math.abs(c.t - b * 0.1) <= 0.15);
       const hitRows = new Set(near.map((c) => Math.round(c.s / DS))).size;
       const cover = hitRows / rows;
@@ -159,12 +160,12 @@ export function findLines(plan: RoadPlan, cands: Cand[], trusted: (i: number) =>
   for (const sg of segs) {
     const prev = chains.find((ch) => {
       const last = ch[ch.length - 1];
-      return sg.s0 <= last.s1 && sg.s0 > last.s0 && Math.abs(last.t - sg.t) < 0.3;
+      return sg.s0 <= last.s1 && sg.s0 > last.s0 && Math.abs(last.t - sg.t) < 0.5;
     });
     if (prev) prev.push(sg);
     else chains.push([sg]);
   }
-  const lines: ImageLine[] = [];
+  const lines: (ImageLine & { weight: number })[] = [];
   for (const ch of chains) {
     const s0 = ch[0].s0 + (ch.length > 1 ? 0 : 10), s1 = ch[ch.length - 1].s1 - (ch.length > 1 ? 0 : 10);
     if (s1 - s0 < 20) continue;
@@ -192,7 +193,25 @@ export function findLines(plan: RoadPlan, cands: Cand[], trusted: (i: number) =>
       kind: cover > 0.5 ? "solid" : "dash",
       phase: phases[phases.length >> 1],
       colour: ch.filter((c) => c.yellow).length > ch.length / 2 ? "yellow" : "white",
+      weight: (s1 - s0) * cover,
     });
   }
-  return lines;
+  // Where two lines run side by side less than a metre apart they are one
+  // line read twice (windows that disagreed a little): keep the stronger.
+  lines.sort((a, b) => b.weight - a.weight);
+  const kept: ImageLine[] = [];
+  for (const ln of lines) {
+    const clash = kept.some((k) => {
+      const lo = Math.max(ln.i0, k.i0), hi = Math.min(ln.i1, k.i1);
+      if (hi - lo < (ln.i1 - ln.i0) * 0.3) return false;
+      let d = 0;
+      for (let i = lo; i <= hi; i++) d += Math.abs(ln.t[i - ln.i0] - k.t[i - k.i0]);
+      return d / (hi - lo + 1) < 1;
+    });
+    if (!clash) {
+      const { weight: _w, ...line } = ln;
+      kept.push(line);
+    }
+  }
+  return kept.sort((a, b) => a.i0 - b.i0);
 }
