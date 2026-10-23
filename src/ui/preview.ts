@@ -14,6 +14,8 @@ export interface PreviewScene {
   open(): void;
   close(): void;
   toggleDrive(): void;
+  /** Point the camera (AC coordinates) and render one frame; for screenshots. */
+  view(eye: [number, number, number], target: [number, number, number]): void;
   dispose(): void;
 }
 
@@ -170,6 +172,13 @@ export async function createPreview(
     close() {
       running = false;
       driving = false;
+    },
+    view(eye, target) {
+      driving = false;
+      camera.position.set(...eye);
+      controls.target.set(...target);
+      controls.update();
+      renderer.render(scene, camera);
     },
     toggleDrive() {
       driving = !driving;

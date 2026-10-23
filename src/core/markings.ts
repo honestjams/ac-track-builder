@@ -17,6 +17,7 @@ import type { BuildOptions } from "./options";
 import { surfaceHeight, type RoadPlan, type RoadSample } from "./road";
 import { ChunkedMesh } from "./scenery";
 import { pad } from "./roadMesh";
+import type { ImageLine } from "./paintLines";
 
 const LIFT = 0.015;
 const LINE = 0.1;
@@ -142,19 +143,26 @@ export function buildMarkings(
   skip: (s: number) => boolean = () => false,
   /** Where an edge line breaks for a side street (side 1 = left). */
   edgeGap: (side: 1 | -1, s: number) => boolean = () => false,
+  /**
+   * Lines read off the aerial photo, and the samples they speak for. There
+   * the photo decides (including "no lines"); elsewhere markings are
+   * generated from sight distance.
+   */
+  image?: { lines: ImageLine[]; covered: (i: number) => boolean },
 ): Kn5MeshNode[] {
   const paint = new ChunkedMesh(0);
+  const yellow = new ChunkedMesh(0);
   const rrpm = new ChunkedMesh(0);
   const samples = plan.samples;
   const end = plan.closed ? plan.length : samples[samples.length - 1].s;
 
   /** A stripe from s0 to s1 at lateral offset t(sample), `w` wide. */
-  const stripe = (s0: number, s1: number, t: (p: RoadSample) => number, w = LINE) => {
+  const stripe = (s0: number, s1: number, t: (p: RoadSample) => number, w = LINE, cm = paint) => {
     if (s1 - s0 < 0.2) return;
     const stops = [s0];
     for (let i = indexAt(plan, s0) + 1; i < samples.length && samples[i].s < s1; i++) stops.push(samples[i].s);
     stops.push(s1);
-    const mb = paint.next(stops.length * 2);
+    const mb = cm.next(stops.length * 2);
     const base = mb.vertexCount;
     for (const sd of stops) {
       const p = sampleAt(plan, sd);
@@ -187,7 +195,25 @@ export function buildMarkings(
     return out;
   };
 
-  const twoLane = (i: number) => samples[i].width >= MIN_TWO_LANE;
+  const generated = (i: number) => !image?.covered(i);
+  const twoLane = (i: number) => samples[i].width >= MIN_TWO_LANE && generated(i);
+
+  // Lines from the photo, at their measured offsets, dashed in phase with the real ones.
+  for (const ln of image?.lines ?? []) {
+    const offsetAt = (p: RoadSample) => {
+      const i = Math.max(ln.i0, Math.min(ln.i1, indexAt(plan, p.s)));
+      return ln.t[i - ln.i0];
+    };
+    const cm = ln.colour === "yellow" ? yellow : paint;
+    for (const [a, b] of runs((i) => i >= ln.i0 && i <= ln.i1)) {
+      if (ln.kind === "solid") stripe(a, b, offsetAt, LINE, cm);
+      else {
+        for (let d = Math.floor((a - ln.phase) / 12) * 12 + ln.phase; d < b; d += 12) {
+          stripe(Math.max(a, d), Math.min(b, d + 3), offsetAt, LINE, cm);
+        }
+      }
+    }
+  }
 
   // Edge lines, 0.2 m in from the seal edge.
   for (const side of [1, -1] as const) {
@@ -231,6 +257,7 @@ export function buildMarkings(
 
   return [
     ...paint.all().map((m, i) => m.toKn5(`MARKINGS_${pad(i)}`, "paint", { castShadows: false })),
+    ...yellow.all().map((m, i) => m.toKn5(`MARKINGS_Y_${pad(i)}`, "paint_yellow", { castShadows: false })),
     ...rrpm.all().map((m, i) => m.toKn5(`RRPM_${pad(i)}`, "rrpm", { castShadows: false })),
   ];
 }

@@ -132,6 +132,7 @@ if (import.meta.env.DEV) {
       refreshRoute();
     },
     result: () => lastResult,
+    preview: () => preview,
   };
 }
   refreshRoute();
@@ -151,6 +152,7 @@ if (import.meta.env.DEV) {
       refreshRoute();
     },
     result: () => lastResult,
+    preview: () => preview,
   };
 }
   refreshRoute();
@@ -170,6 +172,7 @@ if (import.meta.env.DEV) {
       refreshRoute();
     },
     result: () => lastResult,
+    preview: () => preview,
   };
 }
   refreshRoute();
@@ -188,6 +191,7 @@ if (import.meta.env.DEV) {
       refreshRoute();
     },
     result: () => lastResult,
+    preview: () => preview,
   };
 }
   refreshRoute();
@@ -395,6 +399,7 @@ const STAGES: Record<string, [number, number]> = {
   "Fetching elevation": [0.08, 0.2],
   "Fetching aerial imagery": [0.2, 0.75],
   "Building road and terrain meshes": [0.75, 0.88],
+  "Reading line markings from the aerial photos": [0.75, 0.8],
   "Placing scenery": [0.88, 0.9],
   "Writing track files": [0.9, 0.95],
   "Rendering preview": [0.95, 0.98],
@@ -502,7 +507,7 @@ function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<Imag
     ["Trees", s.trees.toLocaleString()],
     ["Buildings", `${s.buildings.toLocaleString()}${s.buildingsDetected ? ` (${s.buildingsDetected} from imagery)` : ""}`],
     ["Imagery", [...usedImagery].map((k) => IMAGERY[k].label.replace(" Government", "")).join(" + ") || "none"],
-    ["Traced from photos", `${Math.round(s.traced * 100)}% of the road`],
+    ["Traced from photos", `${Math.round(s.traced * 100)}% of the road, ${s.photoLines} lines`],
     ["Side streets", s.sideStreets.toLocaleString()],
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
@@ -537,5 +542,6 @@ if (import.meta.env.DEV) {
       refreshRoute();
     },
     result: () => lastResult,
+    preview: () => preview,
   };
 }

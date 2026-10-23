@@ -24,6 +24,7 @@ import {
 import { buildBuildings, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
+import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, planSideStreets, type StreetLine, type StreetName } from "./sideStreets";
 
@@ -96,6 +97,8 @@ export interface TrackResult {
     buildingsDetected: number;
     /** Fraction of the route traced from the aerial photos. */
     traced: number;
+    /** Line markings read off the photo. */
+    photoLines: number;
     sideStreets: number;
     streetSigns: number;
     signs: number;
@@ -258,6 +261,7 @@ export async function buildTrack(
     alphaTested: true,
   });
   addScenery("paint.png", paintTexture(), material("paint", "paint.png", { ambient: 0.5, diffuse: 0.5, specular: 0.1, exp: 15 }));
+  addScenery("paint_yellow.png", solidTexture([226, 182, 32]), material("paint_yellow", "paint_yellow.png", { ambient: 0.5, diffuse: 0.5, specular: 0.1, exp: 15 }));
   addScenery("rrpm.png", solidTexture([238, 238, 232]), material("rrpm", "rrpm.png", { ambient: 0.6, diffuse: 0.5, specular: 0.6, exp: 40 }));
   addScenery("timber.png", solidTexture([92, 74, 58]), material("timber", "timber.png", { ambient: 0.45, diffuse: 0.45, specular: 0, exp: 1 }));
   addScenery("glass.png", solidTexture([120, 140, 150]), material("glass", "glass.png", { ambient: 0.4, diffuse: 0.3, specular: 0.6, exp: 60 }));
@@ -344,11 +348,26 @@ export async function buildTrack(
     return roadMaterial(i, st.width, { ...plan.samples[0], pos: mid });
   });
   const sampleNear = (sd: number) => plan.samples[Math.max(0, Math.min(plan.samples.length - 1, Math.round(sd / opts.spacing)))];
+  // Markings read off the photo where the road was traced; generated elsewhere.
+  let imageLines: ImageLine[] = [];
+  let covered = (_i: number) => false;
+  if (opts.markings && raster && trace) {
+    await progress("Reading line markings from the aerial photos");
+    const tr = trace;
+    const trusted = (i: number) => tr.conf[i] > 0.7;
+    imageLines = findLines(plan, paintCandidates(plan, raster, trusted), trusted);
+    const near = new Uint8Array(plan.samples.length);
+    const reachSamples = Math.round(40 / opts.spacing);
+    for (const ln of imageLines) {
+      for (let i = Math.max(0, ln.i0 - reachSamples); i <= Math.min(plan.samples.length - 1, ln.i1 + reachSamples); i++) near[i] = 1;
+    }
+    covered = (i) => trusted(i) && near[i] === 1;
+  }
   const markings = opts.markings
     ? buildMarkings(plan, opts, (sd) => {
       const p = sampleNear(sd).pos;
       return !!inRoundabout(plan, p[0], p[1], 1);
-    }, mouth)
+    }, mouth, { lines: imageLines, covered })
     : [];
   // The full circulating carriageway and island of each roundabout.
   const ringNodes: Kn5Node[] = [];
@@ -494,6 +513,7 @@ export async function buildTrack(
       buildings: kept.length,
       buildingsDetected: kept.filter((b) => b.source === "detected").length,
       traced: trace?.coverage ?? 0,
+      photoLines: imageLines.length,
       sideStreets: streetPlan.streets.length,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,
