@@ -22,8 +22,8 @@ export type Piece =
   | { kind: "box"; at: Vec2; along: Vec2; length: number; depth: number; z0: number; z1: number; material: string }
   /** Double-sided printed blade (street name), long axis along `dir`. */
   | { kind: "blade"; at: Vec2; dir: Vec2; z: number; height: number; art: string }
-  /** One-sided sign face toward `normal`, plain grey back. */
-  | { kind: "face"; at: Vec2; normal: Vec2; z0: number; height: number; art: string };
+  /** Sign face toward `normal`; plain grey back, or printed both sides. */
+  | { kind: "face"; at: Vec2; normal: Vec2; z0: number; height: number; art: string; twoSided?: boolean };
 
 /** Traffic keeps left: a sign on the left (t > 0) faces traffic coming forward. */
 const facingTraffic = (s: RoadSample, side: 1 | -1): Vec2 => [-s.tan[0] * side, -s.tan[1] * side];
@@ -171,7 +171,7 @@ export function landmarks(pois: Poi[], plan: RoadPlan, index: SegmentIndex, opts
       const leg: Vec2 = [at[0] + s.left[0] * e - normal[0] * 0.1, at[1] + s.left[1] * e - normal[1] * 0.1];
       out.push({ kind: "box", at: leg, along: s.tan, length: 0.12, depth: 0.12, z0: z - 0.5, z1: z + tall, material: "steel" });
     }
-    out.push({ kind: "face", at, normal, z0: z + tall - h, height: h, art: key });
+    out.push({ kind: "face", at, normal, z0: z + tall - h, height: h, art: key, twoSided: true });
   }
   return out;
 }
@@ -290,8 +290,10 @@ export function buildPieces(pieces: Piece[], atlas: ArtAtlas | null): Kn5MeshNod
     }
     const w = p.height * cell.aspect;
     face(mesh("signart", 4), p.at, p.normal, w, p.z0, p.z0 + p.height, cell);
-    const back = atlas?.cells.back;
-    if (back) face(mesh("signart", 4), [p.at[0] - p.normal[0] * 0.01, p.at[1] - p.normal[1] * 0.01], [-p.normal[0], -p.normal[1]], w, p.z0, p.z0 + p.height, back, true);
+    const behind: Vec2 = [p.at[0] - p.normal[0] * 0.01, p.at[1] - p.normal[1] * 0.01];
+    const flip: Vec2 = [-p.normal[0], -p.normal[1]];
+    if (p.twoSided) face(mesh("signart", 4), behind, flip, w, p.z0, p.z0 + p.height, cell);
+    else if (atlas?.cells.back) face(mesh("signart", 4), behind, flip, w, p.z0, p.z0 + p.height, atlas.cells.back, true);
   }
   const out: Kn5MeshNode[] = [];
   for (const [m, cm] of byMat) cm.all().forEach((mb, i) => out.push(mb.toKn5(`FURNITURE_${m.toUpperCase()}_${pad(i)}`, m)));

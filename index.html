@@ -61,9 +61,18 @@
             </label>
             <label class="field">Aerial imagery
               <select id="imagery">
+                <option value="ultra">Ultra · 0.1 m/px (large files)</option>
                 <option value="high">High · 0.2 m/px</option>
                 <option value="standard" selected>Standard · 0.4 m/px</option>
                 <option value="off">Off · grass texture</option>
+              </select>
+            </label>
+            <label class="field">Imagery source
+              <select id="imagerySource">
+                <option value="auto" selected>Auto (sharpest for the area)</option>
+                <option value="qld">Queensland Government</option>
+                <option value="nsw">NSW Government</option>
+                <option value="esri">Esri World Imagery</option>
               </select>
             </label>
             <label class="field">Terrain each side

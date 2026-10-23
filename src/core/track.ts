@@ -57,8 +57,8 @@ export interface DataSources {
   roadClassAt?(p: LngLat): string | undefined;
   /** Asphalt width at a point from map data, metres. */
   widthAt?(p: LngLat): number | undefined;
-  /** Credit line for the imagery source, written into the README. */
-  imageryCredit?: string;
+  /** Credit line for the imagery source(s), written into the README; read after imagery is fetched. */
+  imageryCredit?: string | (() => string);
 }
 
 export interface OsmFeatures {
@@ -451,7 +451,7 @@ export async function buildTrack(
     })),
     [`${slug}/ui/outline.png`]: outlinePng(outline2d),
     [`${slug}/ui/preview.png`]: previewPng(outline2d, plan.closed),
-    [`${slug}/README.txt`]: enc.encode(readme(trackMeta, textured.size ? sources.imageryCredit ?? "aerial imagery" : null)),
+    [`${slug}/README.txt`]: enc.encode(readme(trackMeta, textured.size ? (typeof sources.imageryCredit === "function" ? sources.imageryCredit() : sources.imageryCredit) ?? "aerial imagery" : null)),
   };
 
   const hs = plan.samples.map((s) => s.h);

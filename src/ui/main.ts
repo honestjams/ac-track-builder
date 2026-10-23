@@ -6,7 +6,7 @@ import { buildTrack, type TrackResult } from "../core/track";
 import { zipTrack } from "../core/zip";
 import type { BuildOptions } from "../core/options";
 import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
-import { IMAGERY, loadChunkImagery, loadDem } from "../services/tiles";
+import { IMAGERY, imageryChain, loadChunkImagery, loadDem, type ImagerySource } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
 import { renderArt } from "../services/art";
 import { classWidths, fetchTileFeatures, roadClassLookup } from "../services/vectorTiles";
@@ -27,7 +27,13 @@ const aerial = L.tileLayer(IMAGERY.esri.template, {
   attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
 });
 street.addTo(map);
-L.control.layers({ Street: street, Aerial: aerial }, undefined, { position: "topright" }).addTo(map);
+const stateLayer = (src: ImagerySource) => L.tileLayer(IMAGERY[src].template, { maxZoom: 21, maxNativeZoom: IMAGERY[src].maxZoom, attribution: IMAGERY[src].label });
+L.control.layers({
+  Street: street,
+  "Aerial (Esri)": aerial,
+  "Aerial (Queensland)": stateLayer("qld"),
+  "Aerial (NSW)": stateLayer("nsw"),
+}, undefined, { position: "topright" }).addTo(map);
 
 // Open near the visitor's region, guessed from the time zone (no location prompt).
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
@@ -348,8 +354,8 @@ function readOptions(): Partial<BuildOptions> {
     pitCount: Math.max(1, Math.min(24, Math.round(num("pitCount")))),
     vergeWidth: num("vergeWidth"),
     banking: $<HTMLInputElement>("banking").checked,
-    imageryZoom: imagery === "off" ? 0 : imagery === "high" ? 19 : 18,
-    textureSize: imagery === "high" ? 1024 : 512,
+    imageryZoom: imagery === "off" ? 0 : imagery === "ultra" ? 20 : imagery === "high" ? 19 : 18,
+    textureSize: imagery === "ultra" ? 2048 : imagery === "high" ? 1024 : 512,
     trees: imagery === "off" ? 0 : num("trees"),
     guardRails: $<HTMLInputElement>("guardRails").checked,
     guidePosts: $<HTMLInputElement>("guidePosts").checked,
@@ -403,6 +409,8 @@ $("build").onclick = async () => {
 
   const opts = readOptions();
   const chunkImages = new Map<string, OffscreenCanvas>();
+  const usedImagery = new Set<ImagerySource>();
+  const chain = imageryChain(current.coords[Math.floor(current.coords.length / 2)], $<HTMLSelectElement>("imagerySource").value as ImagerySource | "auto");
   const report = async (stage: string, f = 0) => {
     const [a, b] = STAGES[stage] ?? [0, 1];
     setProgress(stage === "Fetching aerial imagery" ? `${stage} (${Math.round(f * 100)}%)` : stage, a + (b - a) * f);
@@ -422,7 +430,7 @@ $("build").onclick = async () => {
       : osm.widthAt ?? (tileWidths.length ? widthLookup(tileWidths, current.coords[0][1]) : undefined);
     const result = await buildTrack(current.coords, opts, {
       dem: (proj, bounds, z) => loadDem(proj, bounds, z),
-      imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages) : undefined,
+      imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages, chain, usedImagery) : undefined,
       widthAt,
       osm: osm.features,
       roundabouts: current.roundabouts,
@@ -430,7 +438,7 @@ $("build").onclick = async () => {
       pois: tiles?.pois,
       renderArt,
       roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
-      imageryCredit: IMAGERY.esri.credit,
+      imageryCredit: () => [...usedImagery].map((k) => IMAGERY[k].credit).join("; "),
     }, placeMeta, report);
 
     await report("Rendering preview");
@@ -450,7 +458,7 @@ $("build").onclick = async () => {
     a.download = `${result.slug}.zip`;
     a.textContent = `Download ${result.slug}.zip (${(zip.length / 1e6).toFixed(1)} MB)`;
     lastResult = result;
-    showStats(result, !widthAt && !opts.widthOverride);
+    showStats(result, !widthAt && !opts.widthOverride, usedImagery);
     await report("Done", 1);
     $("result").hidden = false;
   } catch (e) {
@@ -464,7 +472,7 @@ $("build").onclick = async () => {
   }
 };
 
-function showStats(r: TrackResult, widthFallback: boolean): void {
+function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<ImagerySource>): void {
   const s = r.stats;
   const rows: [string, string][] = [
     ["Length", `${(s.length / 1000).toFixed(2)} km`],
@@ -474,6 +482,7 @@ function showStats(r: TrackResult, widthFallback: boolean): void {
     ["Avg width", `${s.meanWidth.toFixed(1)} m${widthFallback ? " (default)" : ""}`],
     ["Trees", s.trees.toLocaleString()],
     ["Buildings", `${s.buildings.toLocaleString()}${s.buildingsDetected ? ` (${s.buildingsDetected} from imagery)` : ""}`],
+    ["Imagery", [...usedImagery].map((k) => IMAGERY[k].label.replace(" Government", "")).join(" + ") || "none"],
     ["Side streets", s.sideStreets.toLocaleString()],
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
