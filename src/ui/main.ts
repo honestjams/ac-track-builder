@@ -6,7 +6,7 @@ import { buildTrack, type TrackResult } from "../core/track";
 import { zipTrack } from "../core/zip";
 import type { BuildOptions } from "../core/options";
 import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
-import { IMAGERY, imageryChain, loadChunkImagery, loadDem, type ImagerySource } from "../services/tiles";
+import { DEM_CREDIT, IMAGERY, imageryChain, loadChunkImagery, loadDem, type ImagerySource } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
 import { renderArt } from "../services/art";
 import { loadRouteRaster } from "../services/raster";
@@ -421,6 +421,7 @@ $("build").onclick = async () => {
   const opts = readOptions();
   const chunkImages = new Map<string, OffscreenCanvas>();
   const usedImagery = new Set<ImagerySource>();
+  const usedDem = new Set<keyof typeof DEM_CREDIT>();
   const chain = imageryChain(current.coords[Math.floor(current.coords.length / 2)], $<HTMLSelectElement>("imagerySource").value as ImagerySource | "auto");
   const report = async (stage: string, f = 0) => {
     const [a, b] = STAGES[stage] ?? [0, 1];
@@ -449,7 +450,7 @@ $("build").onclick = async () => {
       ? undefined
       : osm.widthAt ?? (tileWidths.length ? widthLookup(tileWidths, current.coords[0][1]) : undefined);
     const result = await buildTrack(current.coords, opts, {
-      dem: (proj, bounds, z) => loadDem(proj, bounds, z),
+      dem: (proj, bounds, z) => loadDem(proj, bounds, z, undefined, usedDem),
       imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages, chain, usedImagery) : undefined,
       widthAt,
       osm: osm.features,
@@ -460,7 +461,7 @@ $("build").onclick = async () => {
       renderArt,
       raster: (proj, path, reach) => loadRouteRaster(proj, path, reach, chain, 20, (d, t) => setProgress(`Tracing the road in the aerial photos (${Math.round((d / t) * 100)}%)`)),
       roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
-      imageryCredit: () => [...usedImagery].map((k) => IMAGERY[k].credit).join("; "),
+      imageryCredit: () => [...[...usedImagery].map((k) => IMAGERY[k].credit), ...[...usedDem].map((k) => DEM_CREDIT[k])].join("; "),
     }, placeMeta, report);
 
     await report("Rendering preview");
@@ -480,7 +481,7 @@ $("build").onclick = async () => {
     a.download = `${result.slug}.zip`;
     a.textContent = `Download ${result.slug}.zip (${(zip.length / 1e6).toFixed(1)} MB)`;
     lastResult = result;
-    showStats(result, !widthAt && !opts.widthOverride, usedImagery);
+    showStats(result, !widthAt && !opts.widthOverride, usedImagery, usedDem);
     if (token) {
       $("result-stats").insertAdjacentHTML("beforeend", `<div><dt>Mapillary</dt><dd>${seenError ? escapeHtml(seenError) : `${seen.length} objects`}</dd></div>`);
     }
@@ -497,12 +498,12 @@ $("build").onclick = async () => {
   }
 };
 
-function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<ImagerySource>): void {
+function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<ImagerySource>, usedDem: Set<keyof typeof DEM_CREDIT>): void {
   const s = r.stats;
   const rows: [string, string][] = [
     ["Length", `${(s.length / 1000).toFixed(2)} km`],
     ["Layout", s.closed ? "Circuit" : "A to B"],
-    ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m`],
+    ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m${usedDem.has("qld") ? " (Qld bare-earth model)" : ""}`],
     ["Climb", `${Math.round(s.climb)} m`],
     ["Avg width", `${s.meanWidth.toFixed(1)} m${widthFallback ? " (default)" : ""}`],
     ["Trees", s.trees.toLocaleString()],

@@ -89,8 +89,81 @@ function pixels(bitmap: ImageBitmap): Uint8ClampedArray {
   return ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
 }
 
-/** Height sampler for the bounds, from Terrarium tiles. */
+/** Queensland's bare-earth elevation model (0.5 m lidar where captured, SRTM elsewhere in the state). */
+const QLD_DEM = "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Elevation/QldDem/ImageServer/exportImage";
+export const DEM_CREDIT = {
+  qld: "Elevation: Queensland Digital Elevation Model (c) State of Queensland; (c) Commonwealth of Australia (Geoscience Australia)",
+};
+const WORLD = 40075016.68557849;
+
+/** One 256 x 256 web map tile of Queensland DEM heights, or null where it has none. */
+async function qldDemTile(z: number, x: number, y: number): Promise<Float32Array | null> {
+  const size = WORLD / 2 ** z;
+  const x0 = x * size - WORLD / 2, y1 = WORLD / 2 - y * size;
+  const url = `${QLD_DEM}?bbox=${x0},${y1 - size},${x0 + size},${y1}&bboxSR=3857&imageSR=3857&size=256,256`
+    + "&format=bip&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image";
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    // Raw little-endian float32, rows from the north (the server pads the end).
+    if (buf.byteLength < 256 * 256 * 4) return null;
+    const heights = new Float32Array(buf.slice(0, 256 * 256 * 4));
+    return heights.some((h) => Number.isFinite(h) && h > -100) ? heights : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Rough Queensland bounding box. */
+function inQld(proj: LocalProjection, b: Bounds): boolean {
+  const [lng, lat] = proj.toLngLat([(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2]);
+  return lng > 137.9 && lng < 153.7 && lat > -29.3 && lat < -9;
+}
+
+/**
+ * Height sampler for the bounds: Terrarium tiles, and in Queensland the
+ * state's bare-earth model (on a 2 m grid by the road, 20 m for the
+ * horizon), filled from Terrarium where it has a gap. `used` gets "qld"
+ * when the state model was used.
+ */
 export async function loadDem(
+  proj: LocalProjection,
+  bounds: Bounds,
+  zoom: number,
+  onTile?: (done: number, total: number) => void,
+  used?: Set<keyof typeof DEM_CREDIT>,
+): Promise<HeightFn> {
+  const terrarium = await loadTerrarium(proj, bounds, zoom, onTile);
+  if (!inQld(proj, bounds)) return terrarium;
+  // About 2 m for the terrain by the road, 20 m for the horizon.
+  const floor = Math.min(15, zoom);
+  let z = zoom >= 14 ? 16 : 13;
+  while (z > floor && demTilesFor(proj, bounds, z).length > 200) z--;
+  const list = demTilesFor(proj, bounds, z);
+  const tiles: { x: number; y: number; heights: Float32Array }[] = [];
+  let found = 0;
+  for (let k = 0; k < list.length; k += 8) {
+    await Promise.all(list.slice(k, k + 8).map(async ({ x, y }) => {
+      let heights = await qldDemTile(z, x, y);
+      if (heights) found++;
+      heights ??= new Float32Array(256 * 256).fill(NaN);
+      // Gaps (outside the state, no data) from Terrarium.
+      for (let i = 0; i < heights.length; i++) {
+        if (Number.isFinite(heights[i]) && heights[i] > -100) continue;
+        const p = proj.pixelToLocal([x * 256 + (i % 256) + 0.5, y * 256 + Math.floor(i / 256) + 0.5], z);
+        heights[i] = terrarium(p[0], p[1]);
+      }
+      tiles.push({ x, y, heights });
+    }));
+  }
+  if (!found) return terrarium;
+  used?.add("qld");
+  return DemGrid.fromHeights(proj, z, tiles).sample;
+}
+
+/** Height sampler for the bounds, from Terrarium tiles. */
+async function loadTerrarium(
   proj: LocalProjection,
   bounds: Bounds,
   zoom: number,

@@ -14,9 +14,9 @@ Rough priority order. Each chunk is a self-contained change.
    and gutter in town, turn arrows and painted numbers. Next: painted words
    (KEEP CLEAR, BUS), bicycle symbols, kerb returns round the
    corners of side streets, footpaths as their own surface.
-4. **Higher-resolution elevation.** Use national lidar where it's open (e.g.
-   USGS 3DEP 1 m, Geoscience Australia 5 m, Japan GSI 5 m) instead of the
-   tile mosaic.
+4. **Higher-resolution elevation.** Done for Queensland (the state's
+   bare-earth lidar model). Next: NSW (Spatial Services 1 m/5 m DEM),
+   Victoria, USGS 3DEP 1 m, Japan GSI 5 m.
 5. **Build in a Web Worker** so the page stays responsive on long roads.
 6. **CSP extras.** `ext_config.ini` with grass FX, rain puddles and track
    lighting.

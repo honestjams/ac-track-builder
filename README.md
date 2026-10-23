@@ -138,6 +138,10 @@ Node in the tests with synthetic terrain.
   [Photon](https://photon.komoot.io) and Nominatim.
 - Elevation: [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/)
   (SRTM, USGS 3DEP, GMTED and national lidar where available).
+- Elevation in Queensland: the State of Queensland's bare-earth
+  [Queensland Digital Elevation Model](https://spatial-img.information.qld.gov.au/arcgis/rest/services/Elevation/QldDem/ImageServer)
+  (0.5 m lidar where captured), used instead of the tiles there because
+  SRTM-based tiles include the tree canopy.
 - Aerial imagery: Queensland Government and NSW Spatial Services imagery
   where available, else Esri World Imagery.
 - Street-level detections: [Mapillary](https://www.mapillary.com), CC BY-SA,

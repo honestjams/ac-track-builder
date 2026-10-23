@@ -1,6 +1,9 @@
 // Elevation model: a mosaic of Terrarium tiles (AWS Open Data "Terrain Tiles",
 // global, keyless, built from SRTM, USGS 3DEP, national lidar and others),
-// decoded into one height grid and sampled bilinearly in local metres.
+// decoded into one height grid and sampled bilinearly in local metres. In
+// Queensland the state's bare-earth model (lidar where captured) is used
+// instead, on the same tile grid: SRTM measures the tree tops, so a patch
+// of forest stands up as a 20-40 m plateau.
 //
 // Terrarium encoding: height = R * 256 + G + B / 256 - 32768 (metres).
 
@@ -33,20 +36,24 @@ export class DemGrid {
   ) {}
 
   static fromTiles(proj: LocalProjection, z: number, tiles: DecodedTile[]): DemGrid {
+    return DemGrid.fromHeights(proj, z, tiles.map((t) => {
+      const heights = new Float32Array(256 * 256);
+      for (let i = 0; i < heights.length; i++) heights[i] = decodeTerrarium(t.rgba[i * 4], t.rgba[i * 4 + 1], t.rgba[i * 4 + 2]);
+      return { x: t.x, y: t.y, heights };
+    }));
+  }
+
+  /** From 256 x 256 tiles of heights (metres, rows from the north) on the web map tile grid. */
+  static fromHeights(proj: LocalProjection, z: number, tiles: { x: number; y: number; heights: Float32Array }[]): DemGrid {
     const xs = tiles.map((t) => t.x), ys = tiles.map((t) => t.y);
     const tx0 = Math.min(...xs), ty0 = Math.min(...ys);
     const w = (Math.max(...xs) - tx0 + 1) * 256, h = (Math.max(...ys) - ty0 + 1) * 256;
     const data = new Float32Array(w * h);
     for (const t of tiles) {
       const ox = (t.x - tx0) * 256, oy = (t.y - ty0) * 256;
-      for (let y = 0; y < 256; y++) {
-        for (let x = 0; x < 256; x++) {
-          const i = (y * 256 + x) * 4;
-          data[(oy + y) * w + ox + x] = decodeTerrarium(t.rgba[i], t.rgba[i + 1], t.rgba[i + 2]);
-        }
-      }
+      for (let y = 0; y < 256; y++) data.set(t.heights.subarray(y * 256, y * 256 + 256), (oy + y) * w + ox);
     }
-    // Terrarium pixel centres sit at +0.5.
+    // Pixel centres sit at +0.5.
     return new DemGrid(z, tx0 * 256 + 0.5, ty0 * 256 + 0.5, w, h, data, proj);
   }
 
