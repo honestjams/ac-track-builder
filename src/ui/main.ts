@@ -9,6 +9,7 @@ import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place,
 import { IMAGERY, imageryChain, loadChunkImagery, loadDem, type ImagerySource } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
 import { renderArt } from "../services/art";
+import { loadRouteRaster } from "../services/raster";
 import { fetchSeen, savedToken, saveToken } from "../services/mapillary";
 import { classWidths, fetchTileFeatures, roadClassLookup } from "../services/vectorTiles";
 
@@ -368,6 +369,7 @@ function readOptions(): Partial<BuildOptions> {
     sideStreets: $<HTMLInputElement>("sideStreets").checked,
     streetSigns: $<HTMLInputElement>("streetSigns").checked,
     landmarks: $<HTMLInputElement>("landmarks").checked,
+    traceRoads: $<HTMLInputElement>("traceRoads").checked,
   };
 }
 
@@ -389,6 +391,7 @@ function setProgress(text: string, fraction?: number): void {
 const STAGES: Record<string, [number, number]> = {
   "Fetching OpenStreetMap data": [0, 0.05],
   "Laying out the road": [0.05, 0.08],
+  "Tracing the road in the aerial photos": [0.06, 0.08],
   "Fetching elevation": [0.08, 0.2],
   "Fetching aerial imagery": [0.2, 0.75],
   "Building road and terrain meshes": [0.75, 0.88],
@@ -449,6 +452,7 @@ $("build").onclick = async () => {
       pois: tiles?.pois,
       seen,
       renderArt,
+      raster: (proj, path, reach) => loadRouteRaster(proj, path, reach, chain, 20, (d, t) => setProgress(`Tracing the road in the aerial photos (${Math.round((d / t) * 100)}%)`)),
       roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
       imageryCredit: () => [...usedImagery].map((k) => IMAGERY[k].credit).join("; "),
     }, placeMeta, report);
@@ -498,6 +502,7 @@ function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<Imag
     ["Trees", s.trees.toLocaleString()],
     ["Buildings", `${s.buildings.toLocaleString()}${s.buildingsDetected ? ` (${s.buildingsDetected} from imagery)` : ""}`],
     ["Imagery", [...usedImagery].map((k) => IMAGERY[k].label.replace(" Government", "")).join(" + ") || "none"],
+    ["Traced from photos", `${Math.round(s.traced * 100)}% of the road`],
     ["Side streets", s.sideStreets.toLocaleString()],
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],

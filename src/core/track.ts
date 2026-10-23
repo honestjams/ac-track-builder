@@ -7,7 +7,7 @@ import { BACKDROP_CHUNK, backdropHeight, buildBackdropChunk, planBackdrop } from
 import { writeFastLaneAi } from "./aiSpline";
 import { outlinePng, previewPng, readme, slugify, surfacesIni, trackMap, uiTrackJson, type TrackMeta } from "./acFiles";
 import type { HeightFn } from "./elevation";
-import { boundsOf, LocalProjection, type Bounds, type LngLat } from "./geo";
+import { boundsOf, LocalProjection, type Bounds, type LngLat, type Vec2 } from "./geo";
 import { frameTransform, IDENTITY, writeKn5, type Kn5GroupNode, type Kn5Material, type Kn5Model, type Kn5Node, type Kn5Texture } from "./kn5";
 import { toAc } from "./mesh";
 import { withDefaults, type BuildOptions } from "./options";
@@ -24,6 +24,7 @@ import {
 import { buildBuildings, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
+import { applyTrace, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, planSideStreets, type StreetLine, type StreetName } from "./sideStreets";
 
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
@@ -51,6 +52,8 @@ export interface DataSources {
   seen?: { at: LngLat; value: string }[];
   /** Draws the sign artwork atlas; without one, signs are left out. */
   renderArt?: ArtRenderer;
+  /** Sharpest aerial imagery within `reach` metres of the path, for tracing the road. */
+  raster?(proj: LocalProjection, path: Vec2[], reach: number): Promise<RasterSampler | null>;
   /** Roundabouts the router says the route goes round. */
   roundabouts?: RoundaboutHint[];
   /** Road class at a point (OpenMapTiles: motorway, primary, minor, ...). */
@@ -91,6 +94,8 @@ export interface TrackResult {
     trees: number;
     buildings: number;
     buildingsDetected: number;
+    /** Fraction of the route traced from the aerial photos. */
+    traced: number;
     sideStreets: number;
     streetSigns: number;
     signs: number;
@@ -207,6 +212,19 @@ export async function buildTrack(
   const circles = resolveRoundabouts(sources.roundabouts ?? [], sources.osm?.roundaboutRings ?? [], proj);
   const plan = planRoad(local, opts, widthFn, circles);
   if (plan.length < MIN_LENGTH) throw new Error(`Road is ${Math.round(plan.length)} m; make it at least ${MIN_LENGTH} m`);
+
+  // Put the road where the aerial photos show it, at the width they show.
+  let raster: RasterSampler | null = null;
+  let trace: TraceResult | null = null;
+  if (opts.traceRoads && sources.raster) {
+    await progress("Tracing the road in the aerial photos");
+    const reach = Math.max(16, Math.max(...plan.samples.map((s) => s.width)) * 1.5);
+    raster = await sources.raster(proj, plan.samples.map((s) => s.pos), reach);
+    if (raster) {
+      trace = traceRoad(plan, raster);
+      applyTrace(plan, trace, (i) => !!inRoundabout(plan, plan.samples[i].pos[0], plan.samples[i].pos[1], 0.5));
+    }
+  }
 
   await progress("Fetching elevation");
   const bounds = boundsOf(plan.samples.map((s) => s.pos), opts.corridor + opts.terrainBlend + 60);
@@ -475,6 +493,7 @@ export async function buildTrack(
       trees: trees.reduce((n, m) => n + (m.kind === "mesh" ? m.positions.length / 3 / 24 : 0), 0),
       buildings: kept.length,
       buildingsDetected: kept.filter((b) => b.source === "detected").length,
+      traced: trace?.coverage ?? 0,
       sideStreets: streetPlan.streets.length,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,

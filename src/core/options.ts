@@ -68,6 +68,8 @@ export interface BuildOptions {
   streetSigns: boolean;
   /** Signs, bus stops and servo canopies from OSM points of interest. */
   landmarks: boolean;
+  /** Move the road to where the aerial photos show it, at their width. */
+  traceRoads: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -104,6 +106,7 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   sideStreets: true,
   streetSigns: true,
   landmarks: true,
+  traceRoads: true,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

@@ -32,7 +32,7 @@ export const IMAGERY = {
 
 export type ImagerySource = keyof typeof IMAGERY;
 
-const tileUrl = (src: ImagerySource, z: number, x: number, y: number) =>
+export const tileUrl = (src: ImagerySource, z: number, x: number, y: number) =>
   IMAGERY[src].template.replace("{z}", String(z)).replace("{y}", String(y)).replace("{x}", String(x));
 
 /**
@@ -64,7 +64,7 @@ async function limited<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function loadBitmap(url: string, attempts = 3): Promise<ImageBitmap | null> {
+export async function loadBitmap(url: string, attempts = 3): Promise<ImageBitmap | null> {
   return limited(async () => {
     for (let a = 0; a < attempts; a++) {
       try {

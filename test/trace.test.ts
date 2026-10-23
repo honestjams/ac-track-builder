@@ -1,0 +1,55 @@
+import { describe, expect, it } from "vitest";
+import { planRoad } from "../src/core/road";
+import { withDefaults } from "../src/core/options";
+import { applyTrace, traceRoad, type RasterSampler } from "../src/core/trace";
+import type { Vec2 } from "../src/core/geo";
+
+/** OSM line along y = 0; the real 9 m road is centred 1.5 m north of it. */
+function photo(): RasterSampler {
+  let seed = 3;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  return (x, y) => {
+    const n = (rnd() - 0.5) * 0.04;
+    if (x > 50 && x < 150) return [0.12 + n, 0.3 + n, 0.1 + n]; // tree canopy over the road
+    const t = y - 1.5;
+    if (Math.abs(t) < 4.5) {
+      if (x > -102 && x < -98 && t > 0.5 && t < 2.3) return [0.75, 0.1, 0.1]; // a red car
+      if (Math.abs(t) < 0.06 && ((x % 12) + 12) % 12 < 3) return [0.85, 0.85, 0.83]; // dashed centre line
+      const shade = x > -200 && x < -170 ? 0.6 : 1; // a tree shadow across the road
+      return [(0.38 + n) * shade, (0.38 + n) * shade, (0.4 + n) * shade];
+    }
+    return [0.33 + n, 0.45 + n, 0.2 + n]; // grass
+  };
+}
+
+describe("road tracing", () => {
+  const path: Vec2[] = Array.from({ length: 31 }, (_, i) => [i * 20 - 300, 0]);
+  const plan = planRoad(path, withDefaults({ widthOverride: 6 }));
+  const tr = traceRoad(plan, photo());
+  const at = (x: number) => plan.samples.findIndex((s) => s.pos[0] >= x);
+
+  it("finds the real centre and width where the road is visible", () => {
+    expect(tr.coverage).toBeGreaterThan(0.6);
+    for (const x of [-250, -100, -185, 0, 250]) {
+      const i = at(x);
+      expect(tr.offset[i]).toBeCloseTo(1.5, 0);
+      expect(tr.width[i]).toBeGreaterThan(8.3);
+      expect(tr.width[i]).toBeLessThan(9.7);
+    }
+  });
+
+  it("falls back to OSM under tree canopy", () => {
+    const i = at(100);
+    expect(tr.conf[i]).toBeLessThan(0.2);
+    expect(Math.abs(tr.offset[i])).toBeLessThan(0.4);
+  });
+
+  it("moves the centreline and width onto the traced road", () => {
+    const copy = planRoad(path, withDefaults({ widthOverride: 6 }));
+    applyTrace(copy, tr, () => false);
+    const i = at(-250);
+    expect(copy.samples[i].pos[1]).toBeCloseTo(1.5, 0);
+    expect(copy.samples[i].width).toBeCloseTo(9, 0);
+    expect(copy.samples[at(100)].width).toBeLessThan(6.6);
+  });
+});
