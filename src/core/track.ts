@@ -14,7 +14,9 @@ import { withDefaults, type BuildOptions } from "./options";
 import { simplify } from "./polyline";
 import { applyElevation, inRoundabout, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
 import { buildRingMeshes, buildRingWall, innerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
-import { buildRoadMeshes, buildWalls } from "./roadMesh";
+import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
+import { photoRoadTexture } from "./photoSurface";
+import { encodeDdsDxt1 } from "./dds";
 import { buildMarkings } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
 import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, grassTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
@@ -99,6 +101,8 @@ export interface TrackResult {
     traced: number;
     /** Line markings read off the photo. */
     photoLines: number;
+    /** Road chunks textured from the aerial photo. */
+    photoChunks: number;
     sideStreets: number;
     streetSigns: number;
     signs: number;
@@ -325,7 +329,7 @@ export async function buildTrack(
   const surfaceMaterials = new Set<string>();
   const roadMaterial = (ci: number, meanWidth: number, mid: RoadSample): string => {
     let kind: SealKind;
-    if (opts.roadSurface !== "auto") kind = opts.roadSurface;
+    if (opts.roadSurface === "asphalt" || opts.roadSurface === "chipseal") kind = opts.roadSurface;
     else {
       const cls = sources.roadClassAt?.(proj.toLngLat(mid.pos));
       const nearby = centres.filter(([x, y]) => Math.hypot(x - mid.pos[0], y - mid.pos[1]) < 150).length;
@@ -342,7 +346,25 @@ export async function buildTrack(
     }
     return name;
   };
-  const roadMeshes = buildRoadMeshes(plan, opts, roadMaterial, (i, side) => mouth(side, plan.samples[i % plan.samples.length].s));
+  // Photo surface: chunks where the road was traced get their own stretch of the aerial photo.
+  const chunkMaterial: RoadMaterialFn = (ci, w, mid, a, b) => {
+    if (opts.roadSurface === "photo" && raster && trace && a >= 0) {
+      const tr = trace;
+      const trusted = (i: number) => tr.conf[i] > 0.7;
+      let ok = 0;
+      for (let i = a; i <= b; i++) if (trusted(i % plan.samples.length)) ok++;
+      if (ok / (b - a + 1) >= 0.3) {
+        const name = `road_photo_${String(ci).padStart(3, "0")}`;
+        const tex = photoRoadTexture(plan, raster, a, b, trusted);
+        textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(tex.rgba, tex.width, tex.height) });
+        previewTextures[`${name}.dds`] = tex;
+        materials.push(material(name, `${name}.dds`, { ambient: 0.42, diffuse: 0.45, specular: 0.06, exp: 20 }));
+        return { material: name, perChunk: true };
+      }
+    }
+    return roadMaterial(ci, w, mid);
+  };
+  const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % plan.samples.length].s));
   const sideStreets = buildSideStreets(streetPlan.streets, plan, index, opts, (x, y) => terrainAt(x, y).h, (st, i) => {
     const mid = st.pts[Math.floor(st.pts.length / 2)];
     return roadMaterial(i, st.width, { ...plan.samples[0], pos: mid });
@@ -514,6 +536,7 @@ export async function buildTrack(
       buildingsDetected: kept.filter((b) => b.source === "detected").length,
       traced: trace?.coverage ?? 0,
       photoLines: imageLines.length,
+      photoChunks: materials.filter((m) => m.name.startsWith("road_photo_")).length,
       sideStreets: streetPlan.streets.length,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,

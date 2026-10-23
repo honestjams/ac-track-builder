@@ -58,8 +58,11 @@ export interface BuildOptions {
   detectBuildings: boolean;
   /** Buildings are placed up to this far from the road, metres. */
   buildingRadius: number;
-  /** Road surface: by road class and surroundings, or one kind everywhere. */
-  roadSurface: "auto" | "asphalt" | "chipseal";
+  /**
+   * Road surface: by road class and surroundings, one kind everywhere, or
+   * the aerial photo of the road itself where it was traced.
+   */
+  roadSurface: "auto" | "asphalt" | "chipseal" | "photo";
   /** Edge lines, dividing lines and raised markers. */
   markings: boolean;
   /** Draw the other streets near the route. */

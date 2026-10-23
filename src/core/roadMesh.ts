@@ -34,7 +34,12 @@ export interface RoadMeshes {
 }
 
 /** Picks the road material for chunk `ci` (mean width, middle sample). */
-export type RoadMaterialFn = (ci: number, meanWidth: number, mid: RoadSample) => string;
+/**
+ * Picks the road material for chunk `ci` (sections a..b). A plain name tiles
+ * its texture along the road; `{ material, perChunk: true }` stretches one
+ * texture over the whole chunk (the photo surface).
+ */
+export type RoadMaterialFn = (ci: number, meanWidth: number, mid: RoadSample, a: number, b: number) => string | { material: string; perChunk: true };
 
 export function buildRoadMeshes(
   plan: RoadPlan,
@@ -57,10 +62,14 @@ export function buildRoadMeshes(
     const rb = new MeshBuilder();
     const lanes = [0.5, 0.25, 0, -0.25, -0.5];
     let widthSum = 0;
+    for (let i = a; i <= b; i++) widthSum += at(i).width;
+    const meanWidth = widthSum / (b - a + 1);
+    const choice = materialFor(ci, meanWidth, at(Math.floor((a + b) / 2)), a, b);
+    const perChunk = typeof choice !== "string";
+    const sa = sAt(a), sb = sAt(b);
     for (let i = a; i <= b; i++) {
       const s = at(i);
-      widthSum += s.width;
-      const v = sAt(i) / SEAL_LENGTH;
+      const v = perChunk ? (sAt(i) - sa) / Math.max(1e-6, sb - sa) : sAt(i) / SEAL_LENGTH;
       lanes.forEach((f, j) => {
         const t = f * s.width;
         rb.vertex(point(s, t, surfaceHeight(s, t, opts.crown)), j / (lanes.length - 1), v);
@@ -75,8 +84,7 @@ export function buildRoadMeshes(
         rb.quad(p, p + 1, p + cols + 1, p + cols);
       }
     }
-    const meanWidth = widthSum / (b - a + 1);
-    road.push(rb.toKn5(`1ROAD_${pad(ci)}`, materialFor(ci, meanWidth, at(Math.floor((a + b) / 2)))));
+    road.push(rb.toKn5(`1ROAD_${pad(ci)}`, typeof choice === "string" ? choice : choice.material));
 
     if (opts.vergeWidth > 0) {
       const vb = new MeshBuilder();
@@ -153,7 +161,8 @@ export function buildRoadMeshes(
         else mb.tri(tris[t], tris[t + 2], tris[t + 1]);
       }
       const ci = Math.floor(end / CHUNK_SECTIONS);
-      if (mb.indices.length) road.push(mb.toKn5(`1ROAD_RBC${k}_${j++}`, materialFor(ci, s.width, s)));
+      const m = materialFor(ci, s.width, s, -1, -1);
+      if (mb.indices.length) road.push(mb.toKn5(`1ROAD_RBC${k}_${j++}`, typeof m === "string" ? m : m.material));
     }
   });
   return { road, verge };

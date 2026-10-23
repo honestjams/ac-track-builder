@@ -53,3 +53,34 @@ describe("road tracing", () => {
     expect(copy.samples[at(100)].width).toBeLessThan(6.6);
   });
 });
+
+describe("photo road surface", async () => {
+  const { photoRoadTexture, PHOTO_W } = await import("../src/core/photoSurface");
+  const path: Vec2[] = Array.from({ length: 31 }, (_, i) => [i * 20 - 300, 0]);
+  const plan = planRoad(path, withDefaults({ widthOverride: 9 }));
+  plan.samples.forEach((s) => (s.pos = [s.pos[0], s.pos[1] + 1.5]));
+  const tex = photoRoadTexture(plan, photo(), 0, 120, () => true);
+
+  it("covers the chunk and paints out cars and line paint", () => {
+    expect(tex.width).toBe(PHOTO_W);
+    let red = 0, white = 0;
+    for (let i = 0; i < tex.rgba.length; i += 4) {
+      const [r, g, b] = [tex.rgba[i], tex.rgba[i + 1], tex.rgba[i + 2]];
+      if (r > 150 && g < 80) red++;
+      if (r > 170 && g > 170 && b > 170) white++;
+    }
+    expect(red).toBe(0);
+    expect(white).toBe(0);
+  });
+
+  it("evens out the tree shadow", () => {
+    // rows over x = -185 (in the shadow) vs x = -250, centre column brightness
+    const row = (x: number) => Math.floor(((x + 300) / 240) * tex.height);
+    const lum = (r: number) => {
+      let sum = 0;
+      for (let c = 20; c < 60; c++) sum += tex.rgba[(r * tex.width + c) * 4];
+      return sum / 40;
+    };
+    expect(lum(row(-185)) / lum(row(-250))).toBeGreaterThan(0.85);
+  });
+});
