@@ -46,8 +46,9 @@ everything runs client-side: no server, no account, no queue.
   and servo canopies, from OpenStreetMap.
 - Street-level detail from Mapillary (optional, free token): real traffic
   signs (speed limits, give way, stop, warnings, chevron alignment
-  markers), power poles, street lights, traffic lights, stop lines and
-  zebra crossings where its photos found them.
+  markers), power poles, street lights, traffic lights, stop lines, zebra
+  crossings, turn arrows (centred in their lane, facing their traffic) and
+  painted speed numbers where its photos found them.
 - Sharper aerial imagery from the Queensland and NSW governments where
   available (up to 0.1 m/px), falling back to Esri elsewhere.
 - Scenery: trees wherever the aerial imagery shows tree canopy, guard rails

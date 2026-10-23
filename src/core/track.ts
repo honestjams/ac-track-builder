@@ -18,7 +18,7 @@ import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
 import { buildKerbs, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
 import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1 } from "./dds";
-import { buildMarkings } from "./markings";
+import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
 import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
@@ -466,15 +466,20 @@ export async function buildTrack(
     covered = (i) => trusted(i) && near[i] === 1;
   }
   // Painted marks street-level imagery located: snapped to the road at their distance along it.
-  const discreteMarks = () => (sources.seen ?? []).flatMap((f) => {
-    const m = /^marking--discrete--(stop-line|give-way|crosswalk-zebra)/.exec(f.value);
+  const discreteMarks = (): DiscreteMark[] => (sources.seen ?? []).flatMap((f): DiscreteMark[] => {
+    const m = /^marking--discrete--(stop-line|give-way|crosswalk-zebra|arrow--([a-z-]+)|text--(\d+))/.exec(f.value);
     if (!m) return [];
     const p = proj.toLocal(f.at);
     const n = index.nearest(p[0], p[1], 15);
-    if (!n) return [];
-    const kind = m[1] === "stop-line" ? "stop" as const : m[1] === "give-way" ? "giveway" as const : "zebra" as const;
-    return [{ s: plan.samples[n.seg].s + n.frac * opts.spacing, t: n.t, kind }];
-  }).filter((d, i, all) => !all.slice(0, i).some((e) => e.kind === d.kind && Math.abs(e.s - d.s) < 8));
+    // Seen on this road, not the other carriageway or a side street.
+    if (!n || Math.abs(n.t) > plan.samples[n.seg].width / 2 + 1) return [];
+    const at = { s: plan.samples[n.seg].s + n.frac * opts.spacing, t: n.t };
+    if (m[2]) return [{ ...at, kind: "arrow", shape: m[2] }];
+    if (m[3]) return [{ ...at, kind: "text", shape: m[3] }];
+    return [{ ...at, kind: m[1] === "stop-line" ? "stop" : m[1] === "give-way" ? "giveway" : "zebra" }];
+  }).filter((d, i, all) => !all.slice(0, i).some((e) => e.kind === d.kind && Math.abs(e.s - d.s) < 8
+    // Arrows and numbers: one per lane.
+    && (!/^(arrow|text)$/.test(d.kind) || Math.sign(e.t) === Math.sign(d.t) && Math.abs(e.t - d.t) < 1.6)));
   const markings = opts.markings
     ? buildMarkings(plan, opts, (sd) => {
       const p = sampleNear(sd).pos;

@@ -11,7 +11,8 @@ Rough priority order. Each chunk is a self-contained change.
    multi-lane roundabouts, and CSP grass FX on grassy terrain.
 3. ~~**Truer road edges.**~~ Done: traced from the aerial photo, with line
    markings and an optional photo surface, side streets traced too, kerb
-   and gutter in town. Next: turn arrows and words, kerb returns round the
+   and gutter in town, turn arrows and painted numbers. Next: painted words
+   (KEEP CLEAR, BUS), bicycle symbols, kerb returns round the
    corners of side streets, footpaths as their own surface.
 4. **Higher-resolution elevation.** Use national lidar where it's open (e.g.
    USGS 3DEP 1 m, Geoscience Australia 5 m, Japan GSI 5 m) instead of the

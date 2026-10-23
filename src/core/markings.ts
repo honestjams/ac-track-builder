@@ -149,8 +149,8 @@ export function buildMarkings(
    * generated from sight distance.
    */
   image?: { lines: ImageLine[]; covered: (i: number) => boolean },
-  /** Transverse marks seen by street-level imagery: s along, t across (+ left). */
-  discrete: { s: number; t: number; kind: "stop" | "giveway" | "zebra" }[] = [],
+  /** Marks seen by street-level imagery: s along, t across (+ left). */
+  discrete: DiscreteMark[] = [],
 ): Kn5MeshNode[] {
   const paint = new ChunkedMesh(0);
   const yellow = new ChunkedMesh(0);
@@ -265,6 +265,69 @@ export function buildMarkings(
       mb.quad(a, a + 1, b + 1, b);
     }
   };
+  /** Centre of the lane a lateral offset falls in, from the photo's lines where it has them. */
+  const laneCentre = (sd: number, t: number): number => {
+    const i = indexAt(plan, sd);
+    const half = samples[i].width / 2;
+    const side = t >= 0 ? 1 : -1;
+    const bounds = [0, side * half];
+    for (const ln of image?.lines ?? []) {
+      if (i < ln.i0 || i > ln.i1) continue;
+      const lt = ln.t[i - ln.i0];
+      if (lt * side > 0.5 && lt * side < half - 0.5) bounds.push(lt);
+    }
+    bounds.sort((a, b) => a - b);
+    for (let k = 0; k < bounds.length - 1; k++) {
+      if (t >= bounds[k] && t <= bounds[k + 1] && bounds[k + 1] - bounds[k] < 4.6) return (bounds[k] + bounds[k + 1]) / 2;
+    }
+    // No lane lines to go by: lanes of about 3.4 m across this side.
+    const lanes = Math.max(1, Math.round(half / 3.4));
+    const w = half / lanes;
+    const k = Math.max(0, Math.min(lanes - 1, Math.floor(Math.abs(t) / w)));
+    return side * (k + 0.5) * w;
+  };
+  /**
+   * Strokes and arrowheads in a mark's own frame (a along its direction of
+   * travel, c across, + left), draped onto the road with the tail at sd,
+   * centred on tc. Marks for the other direction (right of the
+   * centreline) are turned round.
+   */
+  const drape = (sd: number, tc: number, g: Glyph) => {
+    const dir = tc >= 0 ? 1 : -1;
+    const put = (mb: MeshBuilder, a: number, c: number) => {
+      const p = sampleAt(plan, sd + dir * a);
+      const t = tc + dir * c;
+      mb.vertex([p.pos[0] + p.left[0] * t, p.pos[1] + p.left[1] * t, surfaceHeight(p, t, opts.crown) + LIFT], 0, 0);
+      mb.normals!.push(0, 0, 1);
+    };
+    for (const line of g.lines) {
+      for (let k = 0; k < line.length - 1; k++) {
+        const [a0, c0] = line[k], [a1, c1] = line[k + 1];
+        const L = Math.hypot(a1 - a0, c1 - c0) || 1;
+        const da = (a1 - a0) / L, dc = (c1 - c0) / L;
+        // Run on half a stroke at each end so corners close up.
+        const e = g.width / 2, na = -dc * e, nc = da * e;
+        const pa = a0 - da * e, pc = c0 - dc * e, qa = a1 + da * e, qc = c1 + dc * e;
+        const mb = paint.next(4);
+        const b = mb.vertexCount;
+        put(mb, pa - na, pc - nc);
+        put(mb, qa - na, qc - nc);
+        put(mb, qa + na, qc + nc);
+        put(mb, pa + na, pc + nc);
+        mb.quad(b, b + 1, b + 2, b + 3);
+      }
+    }
+    for (const h of g.heads) {
+      const [a, c] = h.at, [da, dc] = h.dir;
+      const mb = paint.next(3);
+      const b = mb.vertexCount;
+      put(mb, a + dc * HEAD_HALF, c - da * HEAD_HALF);
+      put(mb, a + da * HEAD_LEN, c + dc * HEAD_LEN);
+      put(mb, a - dc * HEAD_HALF, c + da * HEAD_HALF);
+      mb.tri(b, b + 1, b + 2);
+    }
+  };
+
   for (const d of discrete) {
     if (skip(d.s) || d.s < 1 || d.s > end - 1) continue;
     const half = sampleAt(plan, d.s).width / 2 - 0.2;
@@ -272,9 +335,15 @@ export function buildMarkings(
     if (d.kind === "stop") patch(d.s - 0.15, d.s + 0.15, 0, side * half);
     else if (d.kind === "giveway") {
       for (let t = 0.1; t < half; t += 1.2) patch(d.s - 0.15, d.s + 0.15, side * t, side * Math.min(half, t + 0.6));
-    } else {
+    } else if (d.kind === "zebra") {
       // Zebra: 0.5 m bars across the whole road, 1 m apart, 3 m deep.
       for (let t = -half; t < half - 0.4; t += 1) patch(d.s - 1.5, d.s + 1.5, t, t + 0.5);
+    } else {
+      const g = d.kind === "arrow" ? arrowGlyph(d.shape) : textGlyph(d.shape);
+      if (!g) continue;
+      // Centred on where it was seen, kept on the road; the tail is where its traffic meets it first.
+      const s0 = Math.max(1, Math.min(end - 1 - g.length, d.s - g.length / 2));
+      drape(side > 0 ? s0 : s0 + g.length, laneCentre(d.s, d.t), g);
     }
   }
 
@@ -293,6 +362,86 @@ export function buildMarkings(
     ...yellow.all().map((m, i) => m.toKn5(`MARKINGS_Y_${pad(i)}`, "paint_yellow", { castShadows: false })),
     ...rrpm.all().map((m, i) => m.toKn5(`RRPM_${pad(i)}`, "rrpm", { castShadows: false })),
   ];
+}
+
+/** Transverse marks and symbols seen by street-level imagery: s along, t across (+ left). */
+export interface DiscreteMark {
+  s: number;
+  t: number;
+  kind: "stop" | "giveway" | "zebra" | "arrow" | "text";
+  /** Arrow: left, right, straight, split-left-or-straight, ...; text: the characters. */
+  shape?: string;
+}
+
+/** A painted symbol: strokes and arrowheads, a along the direction of travel from its tail, c across (+ left). */
+export interface Glyph {
+  lines: [number, number][][];
+  heads: { at: [number, number]; dir: [number, number] }[];
+  width: number;
+  length: number;
+}
+
+const HEAD_LEN = 1.2;
+const HEAD_HALF = 0.36;
+
+const unit = (a: number, c: number): [number, number] => {
+  const l = Math.hypot(a, c) || 1;
+  return [a / l, c / l];
+};
+
+/**
+ * Pavement arrows, elongated as they are painted so they read from a
+ * driver's eye: 5 m long, the turn branches reaching about a metre across.
+ */
+export function arrowGlyph(shape = "straight"): Glyph | null {
+  const straight = { line: [[0, 0], [3.8, 0]] as [number, number][], head: { at: [3.8, 0] as [number, number], dir: [1, 0] as [number, number] } };
+  const turn = (side: 1 | -1, from: number) => {
+    const end: [number, number] = [from + 1.0, side * 0.55];
+    return { line: [[from, 0], end] as [number, number][], head: { at: end, dir: unit(1.0, side * 0.55) } };
+  };
+  const parts = {
+    straight: [straight],
+    left: [{ line: [[0, 0], [2.4, 0]] as [number, number][], head: null }, turn(1, 2.4)],
+    right: [{ line: [[0, 0], [2.4, 0]] as [number, number][], head: null }, turn(-1, 2.4)],
+    "split-left-or-straight": [straight, turn(1, 1.6)],
+    "split-right-or-straight": [straight, turn(-1, 1.6)],
+    "split-left-or-right": [{ line: [[0, 0], [2.4, 0]] as [number, number][], head: null }, turn(1, 2.4), turn(-1, 2.4)],
+  }[shape];
+  if (!parts) return null;
+  return {
+    lines: parts.map((p) => p.line),
+    heads: parts.flatMap((p) => (p.head ? [p.head] : [])),
+    width: 0.2,
+    length: 5,
+  };
+}
+
+/** Stroke digits in a unit box: x across (0 = left as read), y along (0 = nearest). */
+const DIGITS: Record<string, [number, number][][]> = {
+  "0": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+  "1": [[[0.5, 0], [0.5, 1], [0.2, 0.8]]],
+  "2": [[[0, 1], [1, 1], [1, 0.5], [0, 0.5], [0, 0], [1, 0]]],
+  "3": [[[0, 1], [1, 1], [1, 0], [0, 0]], [[0.2, 0.5], [1, 0.5]]],
+  "4": [[[0, 1], [0, 0.45], [1, 0.45]], [[0.75, 1], [0.75, 0]]],
+  "5": [[[1, 1], [0, 1], [0, 0.5], [1, 0.5], [1, 0], [0, 0]]],
+  "6": [[[1, 1], [0, 1], [0, 0], [1, 0], [1, 0.5], [0, 0.5]]],
+  "7": [[[0, 1], [1, 1], [0.35, 0]]],
+  "8": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], [[0, 0.5], [1, 0.5]]],
+  "9": [[[1, 0.5], [0, 0.5], [0, 1], [1, 1], [1, 0], [0, 0]]],
+};
+
+/** Painted numbers (speed limits, school zones): 3 m tall elongated digits. */
+export function textGlyph(text = ""): Glyph | null {
+  const chars = [...text].filter((ch) => DIGITS[ch]);
+  if (!chars.length || chars.length > 3) return null;
+  const H = 3, W = 0.75, gap = 0.35;
+  const total = chars.length * W + (chars.length - 1) * gap;
+  const lines: [number, number][][] = [];
+  chars.forEach((ch, k) => {
+    const x0 = k * (W + gap);
+    for (const pl of DIGITS[ch]) lines.push(pl.map(([x, y]) => [y * H, total / 2 - (x0 + x * W)]));
+  });
+  return { lines, heads: [], width: 0.18, length: H };
 }
 
 /** A 100 x 100 x 20 mm marker on the centreline. */
