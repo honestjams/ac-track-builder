@@ -3,6 +3,7 @@ import { planRoad } from "../src/core/road";
 import { withDefaults } from "../src/core/options";
 import { applyTrace, traceRoad, type RasterSampler } from "../src/core/trace";
 import type { Vec2 } from "../src/core/geo";
+import type { SideStreet } from "../src/core/sideStreets";
 
 /** OSM line along y = 0; the real 9 m road is centred 1.5 m north of it. */
 function photo(): RasterSampler {
@@ -82,5 +83,22 @@ describe("photo road surface", async () => {
       return sum / 40;
     };
     expect(lum(row(-185)) / lum(row(-250))).toBeGreaterThan(0.85);
+  });
+});
+
+describe("side street tracing", async () => {
+  const { traceSideStreets } = await import("../src/core/sideStreets");
+  // A street running north from a junction at y = 4; the real 7 m road is centred at x = 1.2.
+  const raster: RasterSampler = (x, y) => {
+    const n = Math.sin(x * 12.9898 + y * 78.233) * 0.015;
+    return Math.abs(x - 1.2) < 3.5 && y > 0 ? [0.37 + n, 0.37 + n, 0.39 + n] : [0.32 + n, 0.44 + n, 0.2 + n];
+  };
+  const st: SideStreet = { pts: Array.from({ length: 50 }, (_, i) => [0, 4 + i * 4] as Vec2), width: 5, cls: "minor", joins: [0] };
+
+  it("moves the street onto its real line but keeps the junction end in place", () => {
+    expect(traceSideStreets([st], raster, withDefaults({}))).toBe(1);
+    expect(st.pts[0][0]).toBeCloseTo(0, 1);
+    expect(st.pts[st.pts.length - 30][0]).toBeCloseTo(1.2, 0);
+    expect(st.widths![st.pts.length - 30]).toBeCloseTo(7, 0);
   });
 });

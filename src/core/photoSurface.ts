@@ -40,8 +40,9 @@ export function photoRoadTexture(
   a: number,
   b: number,
   trusted: (i: number) => boolean,
+  W = PHOTO_W,
+  H = PHOTO_H,
 ): { rgba: Uint8Array; width: number; height: number } {
-  const W = PHOTO_W, H = PHOTO_H;
   const n = plan.samples.length;
   const at = (i: number) => plan.samples[Math.min(n - 1, i % n)];
   const sA = at(a).s, sB = b >= n ? plan.length : at(b).s;
@@ -115,35 +116,119 @@ export function photoRoadTexture(
   })();
 
   const rand = rng(a * 977 + 13);
-  const out = new Uint8Array(W * H * 4);
+  const metresAlong = Math.max(1, sB - sA) / H; // metres per pixel along
+  const metresAcross = Math.max(0.5, plan.samples[a % n].width) / W;
+
+  // 1. Not-asphalt mask (paint, cars, debris), grown by ~0.4 m so outlines go too.
+  const bad = new Uint8Array(W * H);
   for (let r = 0; r < H; r++) {
     const R = sm[r * 3], G = sm[r * 3 + 1], B = sm[r * 3 + 2];
     const refL = (R + G + B) / 3;
-    // Shadow evening: pull the row's asphalt brightness toward the stretch's typical value,
-    // and the whole stretch toward a real asphalt tone (aerials read pale and hazy).
-    const tone = ASPHALT_L / Math.max(0.05, globalL);
-    const gain = Math.max(0.75, Math.min(2.2, globalL / Math.max(0.02, refL))) ** 0.85 * tone;
     for (let c = 0; c < W; c++) {
       const o = (r * W + c) * 3;
-      let cr = rgb[o], cg = rgb[o + 1], cb = rgb[o + 2];
+      const cr = rgb[o], cg = rgb[o + 1], cb = rgb[o + 2];
       const l = (cr + cg + cb) / 3;
       const sum = cr + cg + cb + 1e-4;
       const chromaOff = Math.hypot(cr / sum - R / (refL * 3 + 1e-4), cg / sum - G / (refL * 3 + 1e-4), cb / sum - B / (refL * 3 + 1e-4));
-      const notAsphalt = !rowOk[r] || l > refL * 1.3 + 0.05 || l < refL * 0.4 || chromaOff > 0.06;
-      if (notAsphalt) {
-        // Painted out with the surrounding asphalt.
-        cr = R;
-        cg = G;
-        cb = B;
-      }
+      if (!rowOk[r] || l > refL * 1.3 + 0.05 || chromaOff > 0.06) bad[r * W + c] = 1;
+    }
+  }
+  const growR = Math.max(1, Math.round(0.4 / metresAlong)), growC = Math.max(1, Math.round(0.4 / metresAcross));
+  const grownRows = new Uint8Array(W * H);
+  for (let c = 0; c < W; c++) {
+    let last = -Infinity;
+    for (let r = 0; r < H; r++) {
+      if (bad[r * W + c]) last = r;
+      if (r - last <= growR) grownRows[r * W + c] = 1;
+    }
+    last = Infinity;
+    for (let r = H - 1; r >= 0; r--) {
+      if (bad[r * W + c]) last = r;
+      if (last - r <= growR) grownRows[r * W + c] = 1;
+    }
+  }
+  const mask = new Uint8Array(W * H);
+  for (let r = 0; r < H; r++) {
+    let last = -Infinity;
+    for (let c = 0; c < W; c++) {
+      if (grownRows[r * W + c]) last = c;
+      if (c - last <= growC) mask[r * W + c] = 1;
+    }
+    last = Infinity;
+    for (let c = W - 1; c >= 0; c--) {
+      if (grownRows[r * W + c]) last = c;
+      if (last - c <= growC) mask[r * W + c] = 1;
+    }
+  }
+
+  // 2. Fill the mask smoothly from the asphalt around it (normalised
+  // convolution over ~1 m, then ~3 m where holes are big), falling back to
+  // the row's asphalt colour.
+  const valid = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) valid[i] = mask[i] ? 0 : 1;
+  for (const reach of [1, 3]) {
+    const rr = Math.max(1, Math.round(reach / metresAlong)), rc = Math.max(1, Math.round(reach / metresAcross));
+    const wv = boxBlur(valid, W, H, rc, rr);
+    const ch = [0, 1, 2].map((k) => {
+      const plane = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) plane[i] = rgb[i * 3 + k] * valid[i];
+      return boxBlur(plane, W, H, rc, rr);
+    });
+    for (let i = 0; i < W * H; i++) {
+      if (valid[i] || wv[i] < 0.08) continue;
+      for (let k = 0; k < 3; k++) rgb[i * 3 + k] = ch[k][i] / wv[i];
+      valid[i] = 1;
+    }
+  }
+  for (let i = 0; i < W * H; i++) {
+    if (valid[i]) continue;
+    const r = Math.floor(i / W);
+    for (let k = 0; k < 3; k++) rgb[i * 3 + k] = sm[r * 3 + k];
+  }
+
+  // 3. Even out low-frequency brightness (shadows) against a ~1.5 m blur, keeping the fine detail.
+  const lum = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) lum[i] = (rgb[i * 3] + rgb[i * 3 + 1] + rgb[i * 3 + 2]) / 3;
+  const blur = boxBlur(lum, W, H, Math.max(1, Math.round(0.75 / metresAcross)), Math.max(1, Math.round(0.75 / metresAlong)));
+
+  const tone = ASPHALT_L / Math.max(0.05, globalL);
+  const out = new Uint8Array(W * H * 4);
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      const o = (r * W + c) * 3, i = r * W + c;
+      // Mostly flatten brightness to the stretch's typical asphalt, keeping 15% of the broad variation.
+      const flat = Math.max(0.6, Math.min(2.4, globalL / Math.max(0.02, blur[i])));
+      const gain = flat ** 0.85 * tone;
       // Fine grain: aggregate speckle plus a little coarser mottling.
       const grain = (rand() - 0.5) * 0.07 + (rand() - 0.5) * 0.03;
-      const i4 = (r * W + c) * 4;
-      out[i4] = Math.max(0, Math.min(255, (cr * gain + grain) * 255));
-      out[i4 + 1] = Math.max(0, Math.min(255, (cg * gain + grain) * 255));
-      out[i4 + 2] = Math.max(0, Math.min(255, (cb * gain + grain * 1.02) * 255));
+      const i4 = i * 4;
+      out[i4] = Math.max(0, Math.min(255, (rgb[o] * gain + grain) * 255));
+      out[i4 + 1] = Math.max(0, Math.min(255, (rgb[o + 1] * gain + grain) * 255));
+      out[i4 + 2] = Math.max(0, Math.min(255, (rgb[o + 2] * gain + grain * 1.02) * 255));
       out[i4 + 3] = 255;
     }
   }
   return { rgba: out, width: W, height: H };
+}
+
+/** Separable box blur with radii rc (across) and rr (along), clamped at the edges. */
+function boxBlur(src: Float32Array, W: number, H: number, rc: number, rr: number): Float32Array {
+  const tmp = new Float32Array(W * H), out = new Float32Array(W * H);
+  for (let r = 0; r < H; r++) {
+    let acc = 0, cnt = 0;
+    for (let c = -rc; c < W + rc; c++) {
+      if (c + rc >= 0 && c + rc < W) { acc += src[r * W + c + rc]; cnt++; }
+      if (c - rc - 1 >= 0 && c - rc - 1 < W) { acc -= src[r * W + c - rc - 1]; cnt--; }
+      if (c >= 0 && c < W) tmp[r * W + c] = acc / Math.max(1, cnt);
+    }
+  }
+  for (let c = 0; c < W; c++) {
+    let acc = 0, cnt = 0;
+    for (let r = -rr; r < H + rr; r++) {
+      if (r + rr >= 0 && r + rr < H) { acc += tmp[(r + rr) * W + c]; cnt++; }
+      if (r - rr - 1 >= 0 && r - rr - 1 < H) { acc -= tmp[(r - rr - 1) * W + c]; cnt--; }
+      if (r >= 0 && r < H) out[r * W + c] = acc / Math.max(1, cnt);
+    }
+  }
+  return out;
 }

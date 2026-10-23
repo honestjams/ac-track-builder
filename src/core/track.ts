@@ -28,7 +28,7 @@ import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, traceRoad, type RasterSampler, type TraceResult } from "./trace";
-import { buildSideStreets, LineIndex, planSideStreets, type StreetLine, type StreetName } from "./sideStreets";
+import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, type StreetLine, type StreetName } from "./sideStreets";
 
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
 export type Progress = (stage: string, fraction?: number) => void | Promise<void>;
@@ -104,6 +104,8 @@ export interface TrackResult {
     /** Road chunks textured from the aerial photo. */
     photoChunks: number;
     sideStreets: number;
+    /** Side streets traced from the photo. */
+    sideTraced: number;
     streetSigns: number;
     signs: number;
     railMetres: number;
@@ -310,6 +312,7 @@ export async function buildTrack(
   const streetPlan = planSideStreets(
     opts.sideStreets ? sources.streets?.lines ?? [] : [], sources.streets?.names ?? [], plan, index, opts, proj,
   );
+  const sideTraced = raster && opts.traceRoads ? traceSideStreets(streetPlan.streets, raster, opts) : 0;
   const streetIndex = new LineIndex(streetPlan.streets);
   const mouth = (side: 1 | -1, sd: number) => streetPlan.junctions.some((j) => j.side === side && Math.abs(j.s - sd) < j.width / 2 + 1.5);
 
@@ -365,7 +368,30 @@ export async function buildTrack(
     return roadMaterial(ci, w, mid);
   };
   const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % plan.samples.length].s));
+  // Photo surface on the traced side streets too (the nearest 40, to keep the file in check).
+  const photoStreets = new Set(
+    opts.roadSurface === "photo" && raster
+      ? streetPlan.streets
+        .filter((st) => st.traced && st.traced.conf.filter((c) => c > 0.7).length / st.traced.conf.length > 0.5)
+        .map((st) => ({ st, d: Math.min(...st.pts.map((p) => index.nearest(p[0], p[1], 500)?.dist ?? 500)) }))
+        .sort((a, b) => a.d - b.d)
+        .slice(0, 40)
+        .map((x) => x.st)
+      : [],
+  );
   const sideStreets = buildSideStreets(streetPlan.streets, plan, index, opts, (x, y) => terrainAt(x, y).h, (st, i) => {
+    if (photoStreets.has(st) && st.traced && raster) {
+      const sub = st.traced.plan, conf = st.traced.conf;
+      const name = `side_photo_${String(i).padStart(3, "0")}`;
+      // 128 px across; about 12 cm per pixel along, in a power of two.
+      let h = 64;
+      while (h < sub.length / 0.12 && h < 2048) h *= 2;
+      const tex = photoRoadTexture(sub, raster, 0, sub.samples.length - 1, (k) => conf[k] > 0.7, 128, h);
+      textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(tex.rgba, tex.width, tex.height) });
+      previewTextures[`${name}.dds`] = tex;
+      materials.push(material(name, `${name}.dds`, { ambient: 0.42, diffuse: 0.45, specular: 0.06, exp: 20 }));
+      return { material: name, perStreet: true };
+    }
     const mid = st.pts[Math.floor(st.pts.length / 2)];
     return roadMaterial(i, st.width, { ...plan.samples[0], pos: mid });
   });
@@ -548,6 +574,7 @@ export async function buildTrack(
       photoLines: imageLines.length,
       photoChunks: materials.filter((m) => m.name.startsWith("road_photo_")).length,
       sideStreets: streetPlan.streets.length,
+      sideTraced,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,
       railMetres: needs.reduce((n, side) => n + side.filter(Boolean).length * opts.spacing, 0),

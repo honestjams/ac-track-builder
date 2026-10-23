@@ -12,7 +12,8 @@ import type { LngLat, LocalProjection, Vec2 } from "./geo";
 import type { Kn5MeshNode } from "./kn5";
 import type { BuildOptions } from "./options";
 import { resample } from "./polyline";
-import { inRoundabout, surfaceHeight, type RoadPlan, type SegmentIndex } from "./road";
+import { inRoundabout, isLoop, planRoad, surfaceHeight, type RoadPlan, type SegmentIndex } from "./road";
+import { applyTrace, traceRoad, type RasterSampler } from "./trace";
 import { pad } from "./roadMesh";
 import { ChunkedMesh } from "./scenery";
 import { SEAL_LENGTH } from "./textures";
@@ -50,6 +51,10 @@ export interface Junction {
 export interface SideStreet {
   pts: Vec2[];
   width: number;
+  /** Per-point widths once traced from the photo. */
+  widths?: number[];
+  /** The traced centreline as a road plan, and how far to trust each sample. */
+  traced?: { plan: RoadPlan; conf: number[] };
   cls: string;
   name?: string;
   /** Indices into `pts` that sit on the route's edge (junction mouths). */
@@ -220,12 +225,13 @@ export function buildSideStreets(
   index: SegmentIndex,
   opts: BuildOptions,
   ground: HeightFn,
-  materialFor: (st: SideStreet, i: number) => string,
+  materialFor: (st: SideStreet, i: number) => string | { material: string; perStreet: true },
 ): Kn5MeshNode[] {
   const out: Kn5MeshNode[] = [];
   const meshes = new Map<string, ChunkedMesh>();
   streets.forEach((st, si) => {
-    const mat = materialFor(st, si);
+    const choice = materialFor(st, si);
+    const mat = typeof choice === "string" ? choice : choice.material;
     if (!meshes.has(mat)) meshes.set(mat, new ChunkedMesh(0));
     const mb = meshes.get(mat)!.next(st.pts.length * 2);
     const n = st.pts.length;
@@ -244,8 +250,9 @@ export function buildSideStreets(
       const t = norm([b[0] - a[0], b[1] - a[1]]);
       const left: Vec2 = [-t[1], t[0]];
       const dJoin = Math.min(Infinity, ...st.joins.map((j) => Math.abs(along[k] - along[j])));
+      const w = st.widths?.[k] ?? st.width;
       for (const side of [1, -1]) {
-        const x = st.pts[k][0] + left[0] * side * st.width / 2, y = st.pts[k][1] + left[1] * side * st.width / 2;
+        const x = st.pts[k][0] + left[0] * side * w / 2, y = st.pts[k][1] + left[1] * side * w / 2;
         const draped = ground(x, y) + 0.1;
         let z = draped;
         if (dJoin < 10) {
@@ -253,7 +260,7 @@ export function buildSideStreets(
           const f = dJoin / 10;
           z = r + (draped - r) * f * f * (3 - 2 * f);
         }
-        mb.vertex([x, y, z], side > 0 ? 0 : 1, along[k] / SEAL_LENGTH);
+        mb.vertex([x, y, z], side > 0 ? 0 : 1, typeof choice === "string" ? along[k] / SEAL_LENGTH : along[k] / Math.max(1, along[n - 1]));
       }
     }
     for (let k = 0; k < n - 1; k++) {
@@ -269,4 +276,34 @@ export function buildSideStreets(
     }
   }
   return out;
+}
+
+/**
+ * Traces each side street in the aerial photo the way the route is traced,
+ * moving it onto its real line and width. Junction ends stay pinned to the
+ * route's edge.
+ */
+export function traceSideStreets(streets: SideStreet[], raster: RasterSampler, opts: BuildOptions): number {
+  let traced = 0;
+  for (const st of streets) {
+    const length = st.pts.reduce((a, p, k) => (k ? a + Math.hypot(p[0] - st.pts[k - 1][0], p[1] - st.pts[k - 1][1]) : 0), 0);
+    if (length < 30 || isLoop(st.pts)) continue;
+    const sub = planRoad(st.pts, { ...opts, widthOverride: st.width, lineSmoothing: 2, banking: false });
+    const tr = traceRoad(sub, raster);
+    if (tr.coverage < 0.2) continue;
+    const n = sub.samples.length;
+    // Ease the shift to nothing over 12 m at each junction end.
+    const ends = st.joins.map((j) => (j === 0 ? 0 : n - 1));
+    tr.offset = tr.offset.map((o, i) => {
+      const d = Math.min(Infinity, ...ends.map((e) => Math.abs(sub.samples[i].s - sub.samples[e].s)));
+      return o * Math.min(1, d / 12);
+    });
+    applyTrace(sub, tr, () => false);
+    st.pts = sub.samples.map((s) => s.pos);
+    st.widths = sub.samples.map((s) => s.width);
+    st.joins = ends;
+    st.traced = { plan: sub, conf: tr.conf };
+    traced++;
+  }
+  return traced;
 }

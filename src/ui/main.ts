@@ -508,7 +508,7 @@ function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<Imag
     ["Buildings", `${s.buildings.toLocaleString()}${s.buildingsDetected ? ` (${s.buildingsDetected} from imagery)` : ""}`],
     ["Imagery", [...usedImagery].map((k) => IMAGERY[k].label.replace(" Government", "")).join(" + ") || "none"],
     ["Traced from photos", `${Math.round(s.traced * 100)}% of the road, ${s.photoLines} lines${s.photoChunks ? `, ${s.photoChunks} photo-surfaced stretches` : ""}`],
-    ["Side streets", s.sideStreets.toLocaleString()],
+    ["Side streets", `${s.sideStreets.toLocaleString()} (${s.sideTraced} traced)`],
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
     ["Triangles", s.triangles.toLocaleString()],
