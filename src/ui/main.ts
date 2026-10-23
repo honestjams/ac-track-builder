@@ -9,6 +9,7 @@ import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place,
 import { IMAGERY, imageryChain, loadChunkImagery, loadDem, type ImagerySource } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
 import { renderArt } from "../services/art";
+import { fetchSeen, savedToken, saveToken } from "../services/mapillary";
 import { classWidths, fetchTileFeatures, roadClassLookup } from "../services/vectorTiles";
 
 const MAX_KM = 30;
@@ -118,6 +119,7 @@ function renderPins(): void {
 function removePin(i: number): void {
   pins.splice(i, 1);
   renderPins();
+$<HTMLInputElement>("mapillaryToken").value = savedToken();
 
 // Test hook for the browser smoke test (dev server only).
 if (import.meta.env.DEV) {
@@ -418,9 +420,18 @@ $("build").onclick = async () => {
   };
   try {
     await report("Fetching OpenStreetMap data");
-    const [osm, tiles] = await Promise.all([
+    const token = $<HTMLInputElement>("mapillaryToken").value.trim();
+    saveToken(token);
+    let seenError = "";
+    const [osm, tiles, seen] = await Promise.all([
       fetchOsm(current.coords),
       fetchTileFeatures(paddedBounds(current.coords, (opts.buildingRadius ?? 250) + 50)).catch(() => null),
+      token
+        ? fetchSeen(paddedBounds(current.coords, (opts.corridor ?? 90) + 20), token).catch((e) => {
+          seenError = (e as Error).message;
+          return [];
+        })
+        : Promise.resolve([]),
     ]);
     if (tiles) osm.features.buildings = tiles.buildings;
     // Overpass widths when it answered; otherwise widths by road class from the tiles.
@@ -436,6 +447,7 @@ $("build").onclick = async () => {
       roundabouts: current.roundabouts,
       streets: tiles ? { lines: tiles.roads, names: tiles.names } : undefined,
       pois: tiles?.pois,
+      seen,
       renderArt,
       roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
       imageryCredit: () => [...usedImagery].map((k) => IMAGERY[k].credit).join("; "),
@@ -459,6 +471,9 @@ $("build").onclick = async () => {
     a.textContent = `Download ${result.slug}.zip (${(zip.length / 1e6).toFixed(1)} MB)`;
     lastResult = result;
     showStats(result, !widthAt && !opts.widthOverride, usedImagery);
+    if (token) {
+      $("result-stats").insertAdjacentHTML("beforeend", `<div><dt>Mapillary</dt><dd>${seenError ? escapeHtml(seenError) : `${seen.length} objects`}</dd></div>`);
+    }
     await report("Done", 1);
     $("result").hidden = false;
   } catch (e) {

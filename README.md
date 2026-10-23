@@ -27,6 +27,16 @@ everything runs client-side: no server, no account, no queue.
   line on blind bends and crests, plus raised pavement markers.
 - Real roundabouts: the full circulating carriageway, a mountable kerb and a
   planted island, instead of a hairpin where the route goes round one.
+- Side streets: the other roads around the route are drawn too, joined to
+  it at proper junction mouths (motorways, bridges and tunnels are left out).
+- Street name signs (white on blue blades) at every named junction, plus
+  signs for shops, servos, schools and landmarks, bus stops with shelters
+  and servo canopies, from OpenStreetMap.
+- Street-level detail from Mapillary (optional, free token): real traffic
+  signs, power poles, street lights and traffic lights where its photos
+  found them.
+- Sharper aerial imagery from the Queensland and NSW governments where
+  available (up to 0.1 m/px), falling back to Esri elsewhere.
 - Scenery: trees wherever the aerial imagery shows tree canopy, guard rails
   where the ground drops away beside the road (or where OSM maps one), white
   guide posts, and buildings: OSM footprints where mapped, plus placeholder
@@ -87,6 +97,8 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/scenery.ts` | Trees from imagery, guard rails, guide posts |
 | `src/core/buildings.ts` | OSM footprints and roofs detected in imagery, gable roofs |
 | `src/core/markings.ts` | Edge and dividing lines from sight distance, pavement markers |
+| `src/core/sideStreets.ts` | Other streets near the route and their junctions |
+| `src/core/furniture.ts`, `art.ts` | Street name signs, landmarks, bus stops, Mapillary objects; the sign artwork atlas |
 | `src/core/roundabout.ts` | Roundabout circles, ring carriageway, island, connectors |
 | `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
 | `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |
@@ -105,7 +117,10 @@ Node in the tests with synthetic terrain.
   [Photon](https://photon.komoot.io) and Nominatim.
 - Elevation: [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/)
   (SRTM, USGS 3DEP, GMTED and national lidar where available).
-- Aerial imagery: Esri World Imagery. Fine for building tracks for yourself;
+- Aerial imagery: Queensland Government and NSW Spatial Services imagery
+  where available, else Esri World Imagery.
+- Street-level detections: [Mapillary](https://www.mapillary.com), CC BY-SA,
+  with your own client token. Fine for building tracks for yourself;
   **don't publish or sell tracks that contain it.** Pick
   **Aerial imagery → Off** for a track you want to share, and it uses a
   procedural grass texture instead.

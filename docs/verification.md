@@ -31,6 +31,9 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 14 | Guard rails stop the car and sit on the verge, not floating or buried | `1WALL_RAIL_*`, `buildGuardRails` |
 | 15 | Buildings stand on the ground and are solid | `1WALL_BLD_*`, `buildBuildings` |
 | 16 | Line markings don't flicker against the road at a distance | `LIFT` in `markings.ts` (15 mm) |
+| 18 | Side streets meet the route without a step or a gap at the mouth | `buildSideStreets` junction blend |
+| 19 | Street name blades and shop signs read correctly (not mirrored) from both sides | `face()` in `furniture.ts`, atlas UVs |
+| 20 | Sign cut-outs (stop, give way, warning diamonds) have clean edges, no square backgrounds | `signart` material, `ksPerPixelAT` |
 | 17 | Roundabouts drive as a smooth circle; the kerb is mountable; no bump where the road meets the ring | `roundabout.ts`, connectors in `roadMesh.ts` |
 
 ## Known unknowns

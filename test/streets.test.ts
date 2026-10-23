@@ -114,3 +114,17 @@ describe("side streets, signs and furniture", async () => {
     }
   });
 });
+
+describe("Mapillary values to sign art", async () => {
+  const { signArt } = await import("../src/core/furniture");
+  const { ArtList } = await import("../src/core/art");
+  it("maps Australian sign types and ignores the rest", () => {
+    const art = new ArtList();
+    expect(signArt("regulatory--maximum-speed-limit-80--g1", art)).toBe("speed:80");
+    expect(signArt("regulatory--stop--g1", art)).toBe("stop");
+    expect(signArt("regulatory--yield--g1", art)).toBe("giveway");
+    expect(signArt("warning--curve-left--g2", art)).toBe("warning:curve-left");
+    expect(signArt("information--parking--g1", art)).toBeNull();
+    expect(art.list.find((r) => r.key === "speed:80")?.text).toBe("80");
+  });
+});
