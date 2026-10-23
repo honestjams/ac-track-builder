@@ -21,6 +21,14 @@ import type { RoadPlan } from "./road";
 /** Colour of the aerial photo at a local point, 0..1 RGB, or null where there is none. */
 export type RasterSampler = (x: number, y: number) => [number, number, number] | null;
 
+/**
+ * The photo as it should look rather than as detection reads it: a sampler
+ * may carry a colour-balanced `display` variant (see services/raster).
+ */
+export function displayOf(r: RasterSampler): RasterSampler {
+  return (r as RasterSampler & { display?: RasterSampler }).display ?? r;
+}
+
 export interface TraceResult {
   /** Lateral shift of the centreline to the traced road, metres (+ left), per sample. */
   offset: number[];

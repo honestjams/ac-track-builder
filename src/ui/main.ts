@@ -6,7 +6,7 @@ import { buildTrack, type TrackResult } from "../core/track";
 import { zipTrack } from "../core/zip";
 import type { BuildOptions } from "../core/options";
 import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
-import { DEM_CREDIT, IMAGERY, imageryChain, loadChunkImagery, loadDem, type ImagerySource } from "../services/tiles";
+import { DEM_CREDIT, DEM_LABEL, IMAGERY, imageryChain, loadChunkImagery, loadDem, type DemSource, type ImagerySource } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
 import { renderArt } from "../services/art";
 import { loadRouteRaster } from "../services/raster";
@@ -421,7 +421,7 @@ $("build").onclick = async () => {
   const opts = readOptions();
   const chunkImages = new Map<string, OffscreenCanvas>();
   const usedImagery = new Set<ImagerySource>();
-  const usedDem = new Set<keyof typeof DEM_CREDIT>();
+  const usedDem = new Set<DemSource>();
   const chain = imageryChain(current.coords[Math.floor(current.coords.length / 2)], $<HTMLSelectElement>("imagerySource").value as ImagerySource | "auto");
   const report = async (stage: string, f = 0) => {
     const [a, b] = STAGES[stage] ?? [0, 1];
@@ -498,12 +498,12 @@ $("build").onclick = async () => {
   }
 };
 
-function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<ImagerySource>, usedDem: Set<keyof typeof DEM_CREDIT>): void {
+function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<ImagerySource>, usedDem: Set<DemSource>): void {
   const s = r.stats;
   const rows: [string, string][] = [
     ["Length", `${(s.length / 1000).toFixed(2)} km`],
     ["Layout", s.closed ? "Circuit" : "A to B"],
-    ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m${usedDem.has("qld") ? " (Qld bare-earth model)" : ""}`],
+    ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m${usedDem.size ? ` (${[...usedDem].map((k) => DEM_LABEL[k]).join(" + ")} bare-earth model)` : ""}`],
     ["Climb", `${Math.round(s.climb)} m`],
     ["Avg width", `${s.meanWidth.toFixed(1)} m${widthFallback ? " (default)" : ""}`],
     ["Trees", s.trees.toLocaleString()],

@@ -50,7 +50,11 @@ everything runs client-side: no server, no account, no queue.
   crossings, turn arrows (centred in their lane, facing their traffic) and
   painted speed numbers where its photos found them.
 - Sharper aerial imagery from the Queensland and NSW governments where
-  available (up to 0.1 m/px), falling back to Esri elsewhere.
+  available (up to 0.1 m/px), falling back to Esri elsewhere. NSW imagery
+  is colour-matched to Esri's at the zoom in use, as some of its surveys
+  carry a strong blue haze.
+- Bare-earth elevation from the Queensland and NSW government models
+  (lidar where captured) instead of SRTM, which measures the tree tops.
 - Scenery: trees wherever the aerial imagery shows tree canopy, guard rails
   where the ground drops away beside the road (or where OSM maps one), white
   guide posts, and buildings: OSM footprints where mapped, plus placeholder
@@ -138,10 +142,12 @@ Node in the tests with synthetic terrain.
   [Photon](https://photon.komoot.io) and Nominatim.
 - Elevation: [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/)
   (SRTM, USGS 3DEP, GMTED and national lidar where available).
-- Elevation in Queensland: the State of Queensland's bare-earth
+- Elevation in Queensland and NSW: the State of Queensland's bare-earth
   [Queensland Digital Elevation Model](https://spatial-img.information.qld.gov.au/arcgis/rest/services/Elevation/QldDem/ImageServer)
-  (0.5 m lidar where captured), used instead of the tiles there because
-  SRTM-based tiles include the tree canopy.
+  (0.5 m lidar where captured) and NSW Spatial Services'
+  [5 m elevation](https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_5M_Elevation/ImageServer),
+  used instead of the tiles there because SRTM-based tiles include the tree
+  canopy.
 - Aerial imagery: Queensland Government and NSW Spatial Services imagery
   where available, else Esri World Imagery.
 - Street-level detections: [Mapillary](https://www.mapillary.com), CC BY-SA,

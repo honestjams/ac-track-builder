@@ -2,6 +2,7 @@
 // aerial imagery tiles composited into one texture per terrain chunk.
 
 import { DemGrid, demTilesFor, type HeightFn } from "../core/elevation";
+import { applyColours, matchColours, type ColourTransform } from "../core/colour";
 import { encodeDdsDxt1 } from "../core/dds";
 import { tilesCovering, type Bounds, type LngLat, type LocalProjection } from "../core/geo";
 import type { TerrainChunk } from "../core/terrain";
@@ -40,6 +41,36 @@ export const tileUrl = (src: ImagerySource, z: number, x: number, y: number) =>
  * sharper than Esri in their own state and answer 404 outside it, so a
  * chunk falls back tile by tile.
  */
+/** Sources whose colour is matched to Esri's (NSW's mosaic can carry a strong blue cast). */
+const BALANCED = new Set<ImagerySource>(["nsw"]);
+const balances = new Map<string, Promise<ColourTransform | null>>();
+
+/**
+ * Colour transform for one of a source's tiles, matched to Esri's imagery of
+ * the same area; null when the source needs none. The cast belongs to the
+ * survey a zoom level was built from, so the comparison is made at the zoom
+ * in use (Esri's z18 parent, cropped, past z18).
+ */
+export function colourBalance(source: ImagerySource, z: number, x: number, y: number): Promise<ColourTransform | null> {
+  if (!BALANCED.has(source)) return Promise.resolve(null);
+  const key = `${source}/${z}/${x},${y}`;
+  let p = balances.get(key);
+  if (!p) {
+    const zr = Math.min(z, 18), up = z - zr;
+    p = Promise.all([loadBitmap(tileUrl(source, z, x, y)), loadBitmap(tileUrl("esri", zr, x >> up, y >> up))])
+      .then(([a, b]) => {
+        if (!a || !b) return null;
+        const span = 256 >> up;
+        const c = new OffscreenCanvas(span, span).getContext("2d", { willReadFrequently: true })!;
+        c.drawImage(b, (x - ((x >> up) << up)) * span, (y - ((y >> up) << up)) * span, span, span, 0, 0, span, span);
+        return matchColours(pixels(a), c.getImageData(0, 0, span, span).data);
+      })
+      .catch(() => null);
+    balances.set(key, p);
+  }
+  return p;
+}
+
 export function imageryChain(at: LngLat, pick: "auto" | ImagerySource = "auto"): ImagerySource[] {
   if (pick !== "auto") return pick === "esri" ? ["esri"] : [pick, "esri"];
   const [lng, lat] = at;
@@ -89,18 +120,35 @@ function pixels(bitmap: ImageBitmap): Uint8ClampedArray {
   return ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
 }
 
-/** Queensland's bare-earth elevation model (0.5 m lidar where captured, SRTM elsewhere in the state). */
-const QLD_DEM = "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Elevation/QldDem/ImageServer/exportImage";
-export const DEM_CREDIT = {
-  qld: "Elevation: Queensland Digital Elevation Model (c) State of Queensland; (c) Commonwealth of Australia (Geoscience Australia)",
-};
+/**
+ * State bare-earth elevation models, used before the Terrarium tiles where
+ * they cover the road: SRTM-based tiles measure the tree tops.
+ */
+const STATE_DEMS = {
+  qld: {
+    url: "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Elevation/QldDem/ImageServer/exportImage",
+    credit: "Elevation: Queensland Digital Elevation Model (c) State of Queensland; (c) Commonwealth of Australia (Geoscience Australia)",
+    label: "Qld",
+    // Rough lng/lat box: west, south, east, north.
+    box: [137.9, -29.3, 153.7, -9],
+  },
+  nsw: {
+    url: "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_5M_Elevation/ImageServer/exportImage",
+    credit: "Elevation: NSW 5 m elevation (c) Department of Customer Service NSW (Spatial Services)",
+    label: "NSW",
+    box: [140.9, -37.6, 153.7, -28.1],
+  },
+} as const;
+export type DemSource = keyof typeof STATE_DEMS;
+export const DEM_CREDIT = Object.fromEntries(Object.entries(STATE_DEMS).map(([k, v]) => [k, v.credit])) as Record<DemSource, string>;
+export const DEM_LABEL = Object.fromEntries(Object.entries(STATE_DEMS).map(([k, v]) => [k, v.label])) as Record<DemSource, string>;
 const WORLD = 40075016.68557849;
 
-/** One 256 x 256 web map tile of Queensland DEM heights, or null where it has none. */
-async function qldDemTile(z: number, x: number, y: number): Promise<Float32Array | null> {
+/** One 256 x 256 web map tile of a state model's heights, or null where it has none. */
+async function stateDemTile(src: DemSource, z: number, x: number, y: number): Promise<Float32Array | null> {
   const size = WORLD / 2 ** z;
   const x0 = x * size - WORLD / 2, y1 = WORLD / 2 - y * size;
-  const url = `${QLD_DEM}?bbox=${x0},${y1 - size},${x0 + size},${y1}&bboxSR=3857&imageSR=3857&size=256,256`
+  const url = `${STATE_DEMS[src].url}?bbox=${x0},${y1 - size},${x0 + size},${y1}&bboxSR=3857&imageSR=3857&size=256,256`
     + "&format=bip&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image";
   try {
     const res = await fetch(url);
@@ -109,56 +157,66 @@ async function qldDemTile(z: number, x: number, y: number): Promise<Float32Array
     // Raw little-endian float32, rows from the north (the server pads the end).
     if (buf.byteLength < 256 * 256 * 4) return null;
     const heights = new Float32Array(buf.slice(0, 256 * 256 * 4));
-    return heights.some((h) => Number.isFinite(h) && h > -100) ? heights : null;
+    return heights.some(usable) ? heights : null;
   } catch {
     return null;
   }
 }
 
-/** Rough Queensland bounding box. */
-function inQld(proj: LocalProjection, b: Bounds): boolean {
+const usable = (h: number) => Number.isFinite(h) && h > -100 && h < 9000;
+
+/** State models whose rough box takes in the bounds' centre. */
+function statesFor(proj: LocalProjection, b: Bounds): DemSource[] {
   const [lng, lat] = proj.toLngLat([(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2]);
-  return lng > 137.9 && lng < 153.7 && lat > -29.3 && lat < -9;
+  return (Object.keys(STATE_DEMS) as DemSource[]).filter((k) => {
+    const [w, so, e, n] = STATE_DEMS[k].box;
+    return lng > w && lng < e && lat > so && lat < n;
+  });
 }
 
 /**
- * Height sampler for the bounds: Terrarium tiles, and in Queensland the
- * state's bare-earth model (on a 2 m grid by the road, 20 m for the
- * horizon), filled from Terrarium where it has a gap. `used` gets "qld"
- * when the state model was used.
+ * Height sampler for the bounds: Terrarium tiles, and where a state
+ * bare-earth model covers them, that model (on a 2 m grid by the road,
+ * 20 m for the horizon), filled from the next model, then Terrarium, where
+ * it has a gap. `used` gets the state models that were used.
  */
 export async function loadDem(
   proj: LocalProjection,
   bounds: Bounds,
   zoom: number,
   onTile?: (done: number, total: number) => void,
-  used?: Set<keyof typeof DEM_CREDIT>,
+  used?: Set<DemSource>,
 ): Promise<HeightFn> {
   const terrarium = await loadTerrarium(proj, bounds, zoom, onTile);
-  if (!inQld(proj, bounds)) return terrarium;
-  // About 2 m for the terrain by the road, 20 m for the horizon.
+  const states = statesFor(proj, bounds);
+  if (!states.length) return terrarium;
   const floor = Math.min(15, zoom);
   let z = zoom >= 14 ? 16 : 13;
   while (z > floor && demTilesFor(proj, bounds, z).length > 200) z--;
   const list = demTilesFor(proj, bounds, z);
   const tiles: { x: number; y: number; heights: Float32Array }[] = [];
-  let found = 0;
+  const found = new Set<DemSource>();
   for (let k = 0; k < list.length; k += 8) {
     await Promise.all(list.slice(k, k + 8).map(async ({ x, y }) => {
-      let heights = await qldDemTile(z, x, y);
-      if (heights) found++;
-      heights ??= new Float32Array(256 * 256).fill(NaN);
-      // Gaps (outside the state, no data) from Terrarium.
+      const heights = new Float32Array(256 * 256).fill(NaN);
+      for (const src of states) {
+        if (heights.every(usable)) break;
+        const got = await stateDemTile(src, z, x, y);
+        if (!got) continue;
+        found.add(src);
+        for (let i = 0; i < heights.length; i++) if (!usable(heights[i]) && usable(got[i])) heights[i] = got[i];
+      }
+      // Whatever's left (outside the states, no data) from Terrarium.
       for (let i = 0; i < heights.length; i++) {
-        if (Number.isFinite(heights[i]) && heights[i] > -100) continue;
+        if (usable(heights[i])) continue;
         const p = proj.pixelToLocal([x * 256 + (i % 256) + 0.5, y * 256 + Math.floor(i / 256) + 0.5], z);
         heights[i] = terrarium(p[0], p[1]);
       }
       tiles.push({ x, y, heights });
     }));
   }
-  if (!found) return terrarium;
-  used?.add("qld");
+  if (!found.size) return terrarium;
+  for (const src of found) used?.add(src);
   return DemGrid.fromHeights(proj, z, tiles).sample;
 }
 
@@ -204,6 +262,7 @@ export async function loadChunkImagery(
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   ctx.imageSmoothingQuality = "high";
   let any = false;
+  const here = new Set<ImagerySource>();
   for (const [k, source] of chain.entries()) {
     const z = Math.min(IMAGERY[source].maxZoom, zoom);
     const p0 = proj.localToPixel([chunk.minX, chunk.maxY], z);
@@ -223,6 +282,7 @@ export async function loadChunkImagery(
           }
           any = true;
           used?.add(source);
+          here.add(source);
           // +0.5 px overlap hides hairline seams between tiles.
           ctx.drawImage(bmp, (tx * 256 - p0[0]) * scale, (ty * 256 - p0[1]) * scale, 256 * scale + 0.5, 256 * scale + 0.5);
         }));
@@ -235,7 +295,18 @@ export async function loadChunkImagery(
   ctx.globalCompositeOperation = "destination-over";
   ctx.fillStyle = "#56603f";
   ctx.fillRect(0, 0, size, size);
-  previews.set(chunk.key, canvas);
   const rgba = ctx.getImageData(0, 0, size, size).data;
+  // Even out a source's colour cast, by the transform for the chunk's middle.
+  for (const source of here) {
+    const z = Math.min(IMAGERY[source].maxZoom, zoom);
+    const [gx, gy] = proj.localToPixel([(chunk.minX + chunk.maxX) / 2, (chunk.minY + chunk.maxY) / 2], z);
+    const t = await colourBalance(source, z, Math.floor(gx / 256), Math.floor(gy / 256));
+    if (t) {
+      applyColours(rgba, t);
+      ctx.putImageData(new ImageData(rgba, size, size), 0, 0);
+      break;
+    }
+  }
+  previews.set(chunk.key, canvas);
   return { data: encodeDdsDxt1(rgba, size, size), ext: "dds", rgba };
 }

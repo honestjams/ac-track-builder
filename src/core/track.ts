@@ -29,7 +29,7 @@ import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
-import { applyTrace, traceRoad, type RasterSampler, type TraceResult } from "./trace";
+import { applyTrace, displayOf, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, type StreetLine, type StreetName } from "./sideStreets";
 
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
@@ -392,7 +392,7 @@ export async function buildTrack(
       for (let i = a; i <= b; i++) if (trusted(i % plan.samples.length)) ok++;
       if (ok / (b - a + 1) >= 0.3) {
         const name = `road_photo_${String(ci).padStart(3, "0")}`;
-        const tex = photoRoadTexture(plan, raster, a, b, trusted);
+        const tex = photoRoadTexture(plan, displayOf(raster), a, b, trusted);
         textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(tex.rgba, tex.width, tex.height) });
         previewTextures[`${name}.dds`] = tex;
         materials.push(material(name, `${name}.dds`, { ambient: 0.42, diffuse: 0.45, specular: 0.06, exp: 20 }));
@@ -443,7 +443,7 @@ export async function buildTrack(
   const stripMaterial: StripMaterialFn = (ci, a, b) => {
     if (!raster || opts.imageryZoom <= 0) return { material: "grass", photo: false };
     const name = `strip_photo_${String(ci).padStart(3, "0")}`;
-    const tex = stripPhotoTexture(plan, raster, opts, a, b);
+    const tex = stripPhotoTexture(plan, displayOf(raster), opts, a, b);
     textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(tex.rgba, tex.width, tex.height) });
     previewTextures[`${name}.dds`] = tex;
     materials.push(material(name, `${name}.dds`, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
@@ -468,7 +468,7 @@ export async function buildTrack(
       // 128 px across; about 12 cm per pixel along, in a power of two.
       let h = 64;
       while (h < sub.length / 0.12 && h < 2048) h *= 2;
-      const tex = photoRoadTexture(sub, raster, 0, sub.samples.length - 1, (k) => conf[k] > 0.7, 128, h);
+      const tex = photoRoadTexture(sub, displayOf(raster), 0, sub.samples.length - 1, (k) => conf[k] > 0.7, 128, h);
       textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(tex.rgba, tex.width, tex.height) });
       previewTextures[`${name}.dds`] = tex;
       materials.push(material(name, `${name}.dds`, { ambient: 0.42, diffuse: 0.45, specular: 0.06, exp: 20 }));
