@@ -385,11 +385,21 @@ export async function buildTrack(
     }
     covered = (i) => trusted(i) && near[i] === 1;
   }
+  // Painted marks street-level imagery located: snapped to the road at their distance along it.
+  const discreteMarks = () => (sources.seen ?? []).flatMap((f) => {
+    const m = /^marking--discrete--(stop-line|give-way|crosswalk-zebra)/.exec(f.value);
+    if (!m) return [];
+    const p = proj.toLocal(f.at);
+    const n = index.nearest(p[0], p[1], 15);
+    if (!n) return [];
+    const kind = m[1] === "stop-line" ? "stop" as const : m[1] === "give-way" ? "giveway" as const : "zebra" as const;
+    return [{ s: plan.samples[n.seg].s + n.frac * opts.spacing, t: n.t, kind }];
+  }).filter((d, i, all) => !all.slice(0, i).some((e) => e.kind === d.kind && Math.abs(e.s - d.s) < 8));
   const markings = opts.markings
     ? buildMarkings(plan, opts, (sd) => {
       const p = sampleNear(sd).pos;
       return !!inRoundabout(plan, p[0], p[1], 1);
-    }, mouth, { lines: imageLines, covered })
+    }, mouth, { lines: imageLines, covered }, discreteMarks())
     : [];
   // The full circulating carriageway and island of each roundabout.
   const ringNodes: Kn5Node[] = [];

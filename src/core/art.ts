@@ -12,6 +12,7 @@ export type ArtKind =
   | "stop"
   | "giveway"
   | "warning" // yellow diamond, text = a symbol hint (curve-left, curve-right, ...)
+  | "chevron" // chevron alignment marker, text = "left" | "right"
   | "noentry"
   | "keepleft"
   | "bus" // bus stop plate

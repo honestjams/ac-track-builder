@@ -13,6 +13,14 @@ everything runs client-side: no server, no account, no queue.
 - The real road, routed along the OpenStreetMap network between your pins
   (add pins in between to force a route, or tick **Loop back to start** for a
   circuit).
+- The road traced from the aerial photos: where the asphalt can be seen,
+  the road follows its real line and width (OSM is often a metre or two
+  off); under tree canopy it falls back to OpenStreetMap.
+- Line markings read off the photos (lane lines, edge lines, dashed or
+  solid, in phase with the real ones), generated from sight distance where
+  the photos can't show them.
+- Optional photo road surface: each stretch of road textured with its own
+  aerial photo (cars and paint removed, shadows evened, fine grain added).
 - Real elevation from open terrain data, smoothed along the road, with a 2%
   crown and banking in corners.
 - Road width from OSM `width` / `lanes` / road class, or a width you choose.
@@ -33,8 +41,9 @@ everything runs client-side: no server, no account, no queue.
   signs for shops, servos, schools and landmarks, bus stops with shelters
   and servo canopies, from OpenStreetMap.
 - Street-level detail from Mapillary (optional, free token): real traffic
-  signs, power poles, street lights and traffic lights where its photos
-  found them.
+  signs (speed limits, give way, stop, warnings, chevron alignment
+  markers), power poles, street lights, traffic lights, stop lines and
+  zebra crossings where its photos found them.
 - Sharper aerial imagery from the Queensland and NSW governments where
   available (up to 0.1 m/px), falling back to Esri elsewhere.
 - Scenery: trees wherever the aerial imagery shows tree canopy, guard rails
@@ -99,6 +108,9 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/markings.ts` | Edge and dividing lines from sight distance, pavement markers |
 | `src/core/sideStreets.ts` | Other streets near the route and their junctions |
 | `src/core/furniture.ts`, `art.ts` | Street name signs, landmarks, bus stops, Mapillary objects; the sign artwork atlas |
+| `src/core/trace.ts` | Road line and width traced from the aerial photo |
+| `src/core/paintLines.ts` | Line markings read off the aerial photo |
+| `src/core/photoSurface.ts` | Photo road surface textures |
 | `src/core/roundabout.ts` | Roundabout circles, ring carriageway, island, connectors |
 | `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
 | `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |

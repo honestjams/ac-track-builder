@@ -177,6 +177,22 @@ function boxFor(req: ArtRequest, measure: OffscreenCanvasRenderingContext2D): Bo
             ctx.lineTo(x + 80, y + 120);
             ctx.moveTo(x + 44, y + 80);
             ctx.lineTo(x + 116, y + 80);
+          } else if (/roundabout/.test(text)) {
+            ctx.arc(x + 80, y + 84, 24, 0.3, Math.PI * 2 - 0.3);
+            ctx.moveTo(x + 104, y + 70);
+            ctx.lineTo(x + 108, y + 88);
+          } else if (/traffic-signals/.test(text)) {
+            ctx.lineWidth = 4;
+            ctx.strokeRect(x + 66, y + 42, 28, 76);
+            for (const [k, c] of [[0, "#d0201a"], [1, "#f6a700"], [2, "#1b8a3a"]] as const) {
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(x + 80, y + 56 + k * 24, 9, 0, Math.PI * 2);
+              ctx.fillStyle = c;
+              ctx.fill();
+              ctx.restore();
+            }
+            ctx.beginPath();
           } else if (/pedestrian/.test(text)) {
             ctx.arc(x + 80, y + 50, 8, 0, Math.PI * 2);
             ctx.moveTo(x + 80, y + 62);
@@ -190,6 +206,23 @@ function boxFor(req: ArtRequest, measure: OffscreenCanvasRenderingContext2D): Bo
             ctx.moveTo(x + 80, y + 116);
             ctx.lineTo(x + 80, y + 118);
           }
+          ctx.stroke();
+        },
+      };
+    case "chevron":
+      return {
+        w: 128, h: 160, draw(ctx, x, y) {
+          // Chevron alignment marker: black chevron on yellow.
+          ctx.fillStyle = "#f6c700";
+          ctx.fillRect(x, y, 128, 160);
+          ctx.strokeStyle = "#111";
+          ctx.lineWidth = 26;
+          ctx.lineJoin = "miter";
+          ctx.beginPath();
+          const d = text === "left" ? -1 : 1;
+          ctx.moveTo(x + 64 - d * 30, y + 30);
+          ctx.lineTo(x + 64 + d * 26, y + 80);
+          ctx.lineTo(x + 64 - d * 30, y + 130);
           ctx.stroke();
         },
       };

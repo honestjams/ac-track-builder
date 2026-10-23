@@ -128,3 +128,19 @@ describe("Mapillary values to sign art", async () => {
     expect(art.list.find((r) => r.key === "speed:80")?.text).toBe("80");
   });
 });
+
+describe("merging repeat sightings", async () => {
+  const { mergeSightings } = await import("../src/core/furniture");
+  it("folds a traffic light seen front, back and side into one, and keeps different signs apart", () => {
+    const out = mergeSightings([
+      { at: [0, 0], value: "object--traffic-light--general-upright-front" },
+      { at: [1.2, 0.5], value: "object--traffic-light--general-upright-back" },
+      { at: [0.4, -1], value: "object--traffic-light--general-upright-side" },
+      { at: [0.5, 0], value: "regulatory--stop--g1" },
+      { at: [30, 0], value: "object--traffic-light--general-upright-front" },
+    ]);
+    expect(out.filter((f) => f.value.startsWith("object--traffic-light"))).toHaveLength(2);
+    expect(out.filter((f) => f.value.startsWith("regulatory--stop"))).toHaveLength(1);
+    expect(out[0].at[0]).toBeCloseTo(0.53, 1);
+  });
+});

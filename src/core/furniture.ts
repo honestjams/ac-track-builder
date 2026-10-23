@@ -192,6 +192,8 @@ export function signArt(value: string, art: ArtList): string | null {
   if (/^regulatory--yield/.test(value)) return art.add({ key: "giveway", kind: "giveway" });
   if (/^regulatory--no-entry/.test(value)) return art.add({ key: "noentry", kind: "noentry" });
   if (/^regulatory--keep-left/.test(value)) return art.add({ key: "keepleft", kind: "keepleft" });
+  const chev = /^complementary--chevron-(left|right)/.exec(value);
+  if (chev) return art.add({ key: `chevron:${chev[1]}`, kind: "chevron", text: chev[1] });
   const warn = /^warning--([a-z-]+?)(--|$)/.exec(value);
   if (warn) return art.add({ key: `warning:${warn[1]}`, kind: "warning", text: warn[1] });
   return null;
@@ -202,10 +204,40 @@ export function signArt(value: string, art: ArtList): string | null {
  * few metres out, so anything that lands on the road is pushed back onto
  * the verge; signs face the traffic on their side.
  */
+/** What kind of object a Mapillary value is, for merging repeat sightings. */
+function category(value: string): { key: string; radius: number } {
+  if (/^object--support--utility-pole/.test(value)) return { key: "pole", radius: 5 };
+  if (/^object--street-light/.test(value)) return { key: "light", radius: 5 };
+  if (/^object--traffic-light/.test(value)) return { key: "signal", radius: 4 };
+  if (/^marking--/.test(value)) return { key: value, radius: 6 };
+  return { key: value.replace(/--g\d+$/, ""), radius: 6 };
+}
+
+/**
+ * Mapillary reports an object once per way it was seen (a traffic light's
+ * front, back and side are three detections). Detections of the same kind
+ * close together become one, at their average position.
+ */
+export function mergeSightings(features: SeenFeature[]): SeenFeature[] {
+  const groups: { key: string; radius: number; pts: Vec2[]; value: string }[] = [];
+  for (const f of features) {
+    const c = category(f.value);
+    const g = groups.find((x) => x.key === c.key && x.pts.some((p) => Math.hypot(p[0] - f.at[0], p[1] - f.at[1]) < c.radius));
+    if (g) g.pts.push(f.at);
+    else groups.push({ ...c, pts: [f.at], value: f.value });
+  }
+  return groups.map((g) => ({
+    value: g.value,
+    at: [g.pts.reduce((a, p) => a + p[0], 0) / g.pts.length, g.pts.reduce((a, p) => a + p[1], 0) / g.pts.length],
+  }));
+}
+
 export function seenFeatures(features: SeenFeature[], plan: RoadPlan, index: SegmentIndex, opts: BuildOptions, art: ArtList): Piece[] {
   const out: Piece[] = [];
   art.add({ key: "back", kind: "back" });
-  for (const f of features) {
+  for (const f of mergeSightings(features)) {
+    if (/^marking--/.test(f.value)) continue; // painted on the road: see markings
+
     const n = index.nearest(f.at[0], f.at[1], opts.corridor - 2);
     if (!n) continue;
     const s = plan.samples[n.seg];
@@ -239,7 +271,7 @@ export function seenFeatures(features: SeenFeature[], plan: RoadPlan, index: Seg
     }
     const key = signArt(f.value, art);
     if (!key || n.dist > 40) continue;
-    const size = key.startsWith("speed") ? 0.6 : 0.75;
+    const size = key.startsWith("speed") ? 0.6 : key.startsWith("chevron") ? 0.6 : 0.75;
     out.push({ kind: "box", at, along: s.tan, length: 0.065, depth: 0.065, z0: z - 0.4, z1: z + 2.2 + size, material: "steel" });
     out.push({ kind: "face", at: [at[0] + facingTraffic(s, side)[0] * 0.05, at[1] + facingTraffic(s, side)[1] * 0.05], normal: facingTraffic(s, side), z0: z + 2.1, height: size, art: key });
   }

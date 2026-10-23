@@ -149,6 +149,8 @@ export function buildMarkings(
    * generated from sight distance.
    */
   image?: { lines: ImageLine[]; covered: (i: number) => boolean },
+  /** Transverse marks seen by street-level imagery: s along, t across (+ left). */
+  discrete: { s: number; t: number; kind: "stop" | "giveway" | "zebra" }[] = [],
 ): Kn5MeshNode[] {
   const paint = new ChunkedMesh(0);
   const yellow = new ChunkedMesh(0);
@@ -243,6 +245,37 @@ export function buildMarkings(
   for (const [a, b] of runs(lineFor(false, true))) {
     stripe(a, b, () => -LINE);
     broken(a, b, LINE);
+  }
+
+  // Stop lines, give-way lines and zebra crossings where street-level imagery saw them.
+  /** A paint patch from s0..s1 along and t0..t1 across, draped on the road. */
+  const patch = (s0: number, s1: number, t0: number, t1: number) => {
+    const steps = 3;
+    const mb = paint.next((steps + 1) * 2);
+    const base = mb.vertexCount;
+    for (let k = 0; k <= steps; k++) {
+      const p = sampleAt(plan, s0 + ((s1 - s0) * k) / steps);
+      for (const t of [Math.max(t0, t1), Math.min(t0, t1)]) {
+        mb.vertex([p.pos[0] + p.left[0] * t, p.pos[1] + p.left[1] * t, surfaceHeight(p, t, opts.crown) + LIFT], 0, 0);
+        mb.normals!.push(0, 0, 1);
+      }
+    }
+    for (let k = 0; k < steps; k++) {
+      const a = base + k * 2, b = a + 2;
+      mb.quad(a, a + 1, b + 1, b);
+    }
+  };
+  for (const d of discrete) {
+    if (skip(d.s) || d.s < 1 || d.s > end - 1) continue;
+    const half = sampleAt(plan, d.s).width / 2 - 0.2;
+    const side = d.t >= 0 ? 1 : -1;
+    if (d.kind === "stop") patch(d.s - 0.15, d.s + 0.15, 0, side * half);
+    else if (d.kind === "giveway") {
+      for (let t = 0.1; t < half; t += 1.2) patch(d.s - 0.15, d.s + 0.15, side * t, side * Math.min(half, t + 0.6));
+    } else {
+      // Zebra: 0.5 m bars across the whole road, 1 m apart, 3 m deep.
+      for (let t = -half; t < half - 0.4; t += 1) patch(d.s - 1.5, d.s + 1.5, t, t + 0.5);
+    }
   }
 
   // Raised pavement markers between the dividing lines, every 24 m.

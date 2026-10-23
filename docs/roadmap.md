@@ -9,8 +9,9 @@ Rough priority order. Each chunk is a self-contained change.
    scenery: tree trunk collision, pitched roofs, more tree species per
    region, power poles and road signs, give-way lines at roundabout entries,
    multi-lane roundabouts, and CSP grass FX on grassy terrain.
-3. **Truer road edges.** Snap the width to the asphalt visible in the aerial
-   imagery (Street2Sim's "traced from aerial imagery" step).
+3. ~~**Truer road edges.**~~ Done: traced from the aerial photo, with line
+   markings and an optional photo surface. Next: trace side streets too,
+   kerb and gutter where the photo shows one, turn arrows and words.
 4. **Higher-resolution elevation.** Use national lidar where it's open (e.g.
    USGS 3DEP 1 m, Geoscience Australia 5 m, Japan GSI 5 m) instead of the
    tile mosaic.
