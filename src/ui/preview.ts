@@ -110,10 +110,18 @@ export async function createPreview(
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.495;
 
+  // Highest surface under a point (AC x, z), so the camera never starts inside a building or a hill.
+  const ray = new THREE.Raycaster();
+  const topAt = (x: number, z: number, from: number): number => {
+    ray.set(new THREE.Vector3(x, from + 500, z), new THREE.Vector3(0, -1, 0));
+    const hit = ray.intersectObjects(meshes, false)[0];
+    return hit ? hit.point.y : -Infinity;
+  };
   const startView = () => {
     // Above the treetops behind the start, looking ~200 m up the road.
     const s = plan.samples[0], ahead = plan.samples[Math.min(plan.samples.length - 1, 100)];
     const eye = toAc(s.pos[0] - s.tan[0] * 40, s.pos[1] - s.tan[1] * 40, s.h + 35);
+    eye[1] = Math.max(eye[1], topAt(eye[0], eye[2], eye[1]) + 10);
     camera.position.set(...eye);
     controls.target.set(...toAc(ahead.pos[0], ahead.pos[1], ahead.h));
     controls.update();

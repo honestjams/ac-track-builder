@@ -83,7 +83,7 @@ function roadTerrain(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: B
     const v = index.at(n);
     const half = v.width / 2;
     // Behind a kerb the ground starts at nature strip height, past the strip.
-    const inner = half + opts.vergeWidth + STRIP_EXTRA * v.kerb;
+    const inner = half + opts.vergeWidth + (v.kerb > 0 ? STRIP_EXTRA : 0);
     const tc = Math.max(-half, Math.min(half, n.t));
     const edge = v.h + v.bank * tc - opts.crown * Math.abs(tc);
     const beyondEnd = !plan.closed && ((n.seg === 0 && n.frac === 0) || (n.seg === lastSeg && n.frac === 1));

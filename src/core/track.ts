@@ -408,9 +408,8 @@ export async function buildTrack(
     }
   }
   const kerbAt = (i: number, side: 1 | -1) => kerbs[side === 1 ? 0 : 1][((i % nS) + nS) % nS] > 0;
-  // The gravel verge gives way to the kerb wherever the kerb is at full height.
-  const kerbInterior = (i: number, side: 1 | -1) => kerbAt(i - 1, side) && kerbAt(i, side) && kerbAt(i + 1, side);
-  const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % nS].s) || kerbInterior(i, side));
+  // The gravel verge gives way to the kerb's nature strip, which also covers the slopes where kerbs start and end.
+  const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % nS].s) || kerbAt(i, side));
   // Nature strips: the aerial photo of the strip itself when there is one, so footpaths and driveways show.
   const stripMaterial: StripMaterialFn = (ci, a, b) => {
     if (!raster || opts.imageryZoom <= 0) return { material: "grass", photo: false };

@@ -89,14 +89,15 @@ export function photoRoadTexture(
       ref[r * 3 + ch] = tmp[ch][tmp[ch].length >> 1];
     }
   }
-  // Fill untrusted rows from the nearest trusted ones (or a neutral asphalt).
-  let last = -1;
-  for (let r = 0; r < H; r++) if (rowOk[r]) { last = r; } else if (last >= 0) for (let ch = 0; ch < 3; ch++) ref[r * 3 + ch] = ref[last * 3 + ch];
-  last = -1;
-  for (let r = H - 1; r >= 0; r--) {
-    if (!Number.isNaN(ref[r * 3])) { last = r; continue; }
-    for (let ch = 0; ch < 3; ch++) ref[r * 3 + ch] = last >= 0 ? ref[last * 3 + ch] : [0.27, 0.27, 0.28][ch];
-  }
+  // Untrusted rows get this stretch's typical asphalt (the median trusted
+  // row), not their nearest neighbour's, which is often in a tree's shade.
+  const typical = [0, 1, 2].map((ch) => {
+    const v: number[] = [];
+    for (let r = 0; r < H; r += 4) if (rowOk[r]) v.push(ref[r * 3 + ch]);
+    v.sort((x, y) => x - y);
+    return v.length ? v[v.length >> 1] : [0.27, 0.27, 0.28][ch];
+  });
+  for (let r = 0; r < H; r++) if (!rowOk[r]) for (let ch = 0; ch < 3; ch++) ref[r * 3 + ch] = typical[ch];
   // Smooth the reference along the road (~6 m) so it follows surface changes, not cars.
   const span = Math.max(1, Math.round((6 / Math.max(1, sB - sA)) * H));
   const sm = new Float32Array(H * 3);
@@ -109,11 +110,7 @@ export function photoRoadTexture(
       if (r >= 0 && r < H) sm[r * 3 + ch] = acc / Math.max(1, cnt);
     }
   }
-  const globalL = (() => {
-    let s = 0, c = 0;
-    for (let r = 0; r < H; r++) if (rowOk[r]) { s += (ref[r * 3] + ref[r * 3 + 1] + ref[r * 3 + 2]) / 3; c++; }
-    return c ? s / c : 0.27;
-  })();
+  const globalL = (typical[0] + typical[1] + typical[2]) / 3;
 
   const rand = rng(a * 977 + 13);
   const metresAlong = Math.max(1, sB - sA) / H; // metres per pixel along

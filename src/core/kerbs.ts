@@ -33,6 +33,8 @@ const GUTTER_DIP = 0.03;
 /** How much wider than the gravel verge the nature strip runs, metres. */
 export const STRIP_EXTRA = 1.5;
 const SKIRT = 0.8;
+/** The gravel verge's fall from the road edge, which the strip meets where a kerb ends. */
+const VERGE_DROP = 0.2;
 /** Concrete texture repeats (one pour between joints) every this many metres. */
 const POUR = 3;
 
@@ -180,13 +182,15 @@ function profile(s: RoadSample, side: 1 | -1, k: number, opts: BuildOptions, pho
   const half = s.width / 2;
   const e = surfaceHeight(s, half * side, opts.crown);
   const top = e + KERB_H * k, inv = e - GUTTER_DIP * k;
-  const tOut = half + (opts.vergeWidth + STRIP_EXTRA) * k;
+  // The strip keeps its width where a kerb starts or ends and slopes down to verge level instead.
+  const tOut = half + opts.vergeWidth + STRIP_EXTRA;
+  const zOut = top + 0.02 * k - VERGE_DROP * (1 - k);
   const tIn = half + KERB_BACK * k, tFace = half + (GUTTER + FACE_RUN) * k, tLip = half + GUTTER * k;
   // Photo u for the strip: left strip 0..0.5 (outer to kerb), right 0.5..1 (kerb to outer).
   const uOut = photo ? (side === 1 ? 0 : 1) : 0, uIn = photo ? 0.5 : (opts.vergeWidth + STRIP_EXTRA - KERB_BACK) / 4;
   const segs: Seg[] = [
-    { mesh: "strip", a: [tOut, top + 0.02 * k - SKIRT], b: [tOut, top + 0.02 * k], ua: uOut, ub: uOut },
-    { mesh: "strip", a: [tOut, top + 0.02 * k], b: [tIn, top], ua: uOut, ub: uIn },
+    { mesh: "strip", a: [tOut, zOut - SKIRT], b: [tOut, zOut], ua: uOut, ub: uOut },
+    { mesh: "strip", a: [tOut, zOut], b: [tIn, top], ua: uOut, ub: uIn },
     { mesh: "kerb", a: [tIn, top], b: [tFace, top], ua: 0, ub: 0.25 },
     { mesh: "kerb", a: [tFace, top], b: [tLip, inv], ua: 0.25, ub: 0.5 },
     { mesh: "gutter", a: [tLip, inv], b: [half, e], ua: 0.5, ub: 1 },
