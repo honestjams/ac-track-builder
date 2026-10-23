@@ -63,7 +63,7 @@ describe("buildTrack (synthetic terrain)", async () => {
     const names = nodes.map((n) => n.name);
     for (const m of meshes) {
       // physical surfaces, or non-collidable horizon and scenery
-      expect(m.name).toMatch(/^(1(ROAD|GRASS|WALL)_|BACKDROP_|TREES_|GUIDEPOSTS_|RAILPOSTS_|ROOF_|MARKINGS_|RRPM_)/);
+      expect(m.name).toMatch(/^(1(ROAD|GRASS|WALL|KERB)_|BACKDROP_|TREES_|GUIDEPOSTS_|RAILPOSTS_|ROOF_|MARKINGS_|RRPM_)/);
       if (m.kind !== "mesh") continue;
       expect(m.positions.every(Number.isFinite)).toBe(true);
       expect(m.normals.every(Number.isFinite)).toBe(true);

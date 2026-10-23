@@ -26,6 +26,10 @@ everything runs client-side: no server, no account, no queue.
 - Road width from OSM `width` / `lanes` / road class, or a width you choose.
 - Asphalt with edge lines and a dashed centre line, gravel verges, and terrain
   each side of the road textured with aerial imagery.
+- Kerb and gutter in town: a concrete gutter, a 150 mm kerb (its own
+  physics surface, mountable but felt) and a nature strip textured from the
+  aerial photo, so footpaths and driveways show. Out of town only where the
+  photo clearly shows one. Roundabouts in town get a kerbed ring too.
 - Low-detail horizon terrain out to 1.5 km so the world doesn't end at the
   roadside.
 - Australian road surfaces: chip seal on rural roads, dense asphalt on major
@@ -111,6 +115,7 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/trace.ts` | Road line and width traced from the aerial photo |
 | `src/core/paintLines.ts` | Line markings read off the aerial photo |
 | `src/core/photoSurface.ts` | Photo road surface textures |
+| `src/core/kerbs.ts` | Where kerbs are (photo evidence and how built-up it is), kerb, gutter and nature strip meshes |
 | `src/core/roundabout.ts` | Roundabout circles, ring carriageway, island, connectors |
 | `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
 | `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |

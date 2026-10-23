@@ -36,6 +36,8 @@ export interface Roundabout extends Circle {
   sOut: number;
   /** Angles (radians, from +x) where the route crosses the outer edge. */
   crossings: number[];
+  /** Kerb and gutter round the outside instead of a gravel verge (in town). */
+  kerbed?: boolean;
 }
 
 export const RING_FALL = 0.02;
@@ -150,6 +152,8 @@ export interface RingMeshes {
   road: Kn5MeshNode;
   island: Kn5MeshNode;
   verge: Kn5MeshNode;
+  /** Gutter and kerb, when the ring is kerbed. */
+  kerb: Kn5MeshNode[];
 }
 
 /** Circulating carriageway, island (kerb + grassed mound) and outer verge. */
@@ -200,31 +204,66 @@ export function buildRingMeshes(rb: Roundabout, k: number, opts: BuildOptions, r
 
   // Outer verge, except where roads join the ring.
   const verge = new MeshBuilder();
-  const gap = (a: number) => rb.crossings.some((x) => {
+  const gapM = rb.w / 2 + 2;
+  /** Metres round the outer edge from angle a to the nearest road joining the ring. */
+  const toGap = (a: number) => Math.min(...rb.crossings.map((x) => {
     let d = Math.abs(a - x) % (2 * Math.PI);
     if (d > Math.PI) d = 2 * Math.PI - d;
-    return d < (rb.w / 2 + 2) / Ro;
-  });
+    return d * Ro;
+  }));
   const vo = Ro + opts.vergeWidth;
-  for (let s = 0; s < N; s++) {
-    const a0 = (s / N) * 2 * Math.PI, a1 = ((s + 1) / N) * 2 * Math.PI;
-    if (gap(a0) || gap(a1)) continue;
-    const zi0 = ringHeight(rb, Ro), zo = zi0 - 0.2;
-    const i = verge.vertexCount;
-    verge.vertex(at(Ro, a0, zi0), 1, 0);
-    verge.vertex(at(vo, a0, zo), 0.1, 0);
-    verge.vertex(at(vo, a1, zo), 0.1, 1);
-    verge.vertex(at(Ro, a1, zi0), 1, 1);
-    verge.vertex(at(vo, a0, zo - 0.8), 0, 0);
-    verge.vertex(at(vo, a1, zo - 0.8), 0, 1);
-    verge.quad(i, i + 1, i + 2, i + 3);
-    verge.quad(i + 1, i + 4, i + 5, i + 2);
+  const zi = ringHeight(rb, Ro);
+  const kerb: Kn5MeshNode[] = [];
+  if (!rb.kerbed) {
+    for (let s = 0; s < N; s++) {
+      const a0 = (s / N) * 2 * Math.PI, a1 = ((s + 1) / N) * 2 * Math.PI;
+      if (toGap(a0) < gapM || toGap(a1) < gapM) continue;
+      const zo = zi - 0.2;
+      const i = verge.vertexCount;
+      verge.vertex(at(Ro, a0, zi), 1, 0);
+      verge.vertex(at(vo, a0, zo), 0.1, 0);
+      verge.vertex(at(vo, a1, zo), 0.1, 1);
+      verge.vertex(at(Ro, a1, zi), 1, 1);
+      verge.vertex(at(vo, a0, zo - 0.8), 0, 0);
+      verge.vertex(at(vo, a1, zo - 0.8), 0, 1);
+      verge.quad(i, i + 1, i + 2, i + 3);
+      verge.quad(i + 1, i + 4, i + 5, i + 2);
+    }
+  } else {
+    // Gutter, kerb and a grass strip, sloping down to nothing over 2 m either side of each road joining.
+    const gutter = new MeshBuilder(), kb = new MeshBuilder();
+    const profile = (k: number): { mb: MeshBuilder; p: [number, number]; q: [number, number] }[] => [
+      { mb: gutter, p: [Ro, zi], q: [Ro + 0.3 * k, zi - 0.03 * k] },
+      { mb: kb, p: [Ro + 0.3 * k, zi - 0.03 * k], q: [Ro + 0.35 * k, zi + KERB * k] },
+      { mb: kb, p: [Ro + 0.35 * k, zi + KERB * k], q: [Ro + 0.5 * k, zi + KERB * k] },
+      { mb: verge, p: [Ro + 0.5 * k, zi + KERB * k], q: [vo, zi + (KERB + 0.02) * k - 0.2 * (1 - k)] },
+      { mb: verge, p: [vo, zi + (KERB + 0.02) * k - 0.2 * (1 - k)], q: [vo, zi + (KERB + 0.02) * k - 1] },
+    ];
+    for (let s = 0; s < N; s++) {
+      const a0 = (s / N) * 2 * Math.PI, a1 = ((s + 1) / N) * 2 * Math.PI;
+      const k0 = Math.max(0, Math.min(1, (toGap(a0) - gapM) / 2)), k1 = Math.max(0, Math.min(1, (toGap(a1) - gapM) / 2));
+      if (k0 === 0 && k1 === 0) continue;
+      const P0 = profile(k0), P1 = profile(k1);
+      P0.forEach((g, j) => {
+        const h = P1[j];
+        const v0 = (a0 * Ro) / 3, v1 = (a1 * Ro) / 3;
+        const i = g.mb.vertexCount;
+        g.mb.vertex(at(g.p[0], a0, g.p[1]), 0, v0);
+        g.mb.vertex(at(g.q[0], a0, g.q[1]), 1, v0);
+        g.mb.vertex(at(h.q[0], a1, h.q[1]), 1, v1);
+        g.mb.vertex(at(h.p[0], a1, h.p[1]), 0, v1);
+        g.mb.quad(i, i + 1, i + 2, i + 3);
+      });
+    }
+    if (gutter.indices.length) kerb.push(gutter.toKn5(`1ROAD_RBGUTTER${k}`, "concrete"));
+    if (kb.indices.length) kerb.push(kb.toKn5(`1KERB_RB${k}`, "concrete"));
   }
 
   return {
     road: road.toKn5(`1ROAD_RB${k}`, roadMaterial),
     island: island.toKn5(`1GRASS_RBISLAND${k}`, "grass"),
-    verge: verge.toKn5(`1GRASS_RBVERGE${k}`, "verge"),
+    verge: verge.toKn5(`1GRASS_RBVERGE${k}`, rb.kerbed ? "grass" : "verge"),
+    kerb,
   };
 }
 

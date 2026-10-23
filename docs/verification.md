@@ -35,6 +35,7 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 18 | Side streets meet the route without a step or a gap at the mouth | `buildSideStreets` junction blend |
 | 19 | Street name blades and shop signs read correctly (not mirrored) from both sides | `face()` in `furniture.ts`, atlas UVs |
 | 20 | Sign cut-outs (stop, give way, warning diamonds) have clean edges, no square backgrounds | `signart` material, `ksPerPixelAT` |
+| 21 | Kerbs jolt the car when mounted at speed but can be driven over slowly; the gutter drives like road; no gap between gutter and asphalt | `KERB` in `surfaces.ini`, `1KERB_*` / `1ROAD_GUTTER_*` in `kerbs.ts` |
 
 ## Known unknowns
 

@@ -185,6 +185,22 @@ export function grassTexture(): Uint8Array {
   return encodePng(px, w, h, { alpha: false });
 }
 
+/**
+ * Kerb and gutter concrete: pale grey, weathered, with a contraction joint
+ * across the top row (v = 0) so each tile of the texture is one pour.
+ */
+export function concreteTexture(): Uint8Array {
+  const w = 64, h = 256;
+  const n1 = valueNoise(w, h, 4, 41), n2 = valueNoise(w, h, 16, 42);
+  const r = rng(43);
+  return encodePng(fill(w, h, (_x, y, i) => {
+    const k = n1[i] * 0.6 + n2[i] * 0.4;
+    const joint = y < 2 ? 0.55 : 1;
+    const g = 150 + k * 34 + (r() - 0.5) * 16;
+    return [g * joint, g * joint, (g - 4) * joint];
+  }), w, h, { alpha: false });
+}
+
 export function solidTexture(rgb: [number, number, number]): Uint8Array {
   return encodePng(fill(4, 4, () => rgb), 4, 4, { alpha: false });
 }

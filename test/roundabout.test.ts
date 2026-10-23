@@ -3,7 +3,8 @@ import { buildTrack, type DataSources } from "../src/core/track";
 import { DemGrid } from "../src/core/elevation";
 import { LocalProjection, type LngLat, type Vec2 } from "../src/core/geo";
 import { readKn5, type Kn5MeshNode, type Kn5Node } from "../src/core/kn5";
-import { fitCircle, resolveRoundabouts } from "../src/core/roundabout";
+import { buildRingMeshes, fitCircle, resolveRoundabouts, ringHeight } from "../src/core/roundabout";
+import { withDefaults } from "../src/core/options";
 
 const proj = new LocalProjection([153.4, -28.0]);
 const ll = (p: Vec2): LngLat => proj.toLngLat(p);
@@ -79,6 +80,22 @@ describe("buildTrack through a roundabout", async () => {
     // the surface faces up and is level within the 2% fall
     for (let i = 0; i < ring.normals.length; i += 3) expect(ring.normals[i + 1]).toBeGreaterThan(0.99);
     expect(names.filter((n) => n.startsWith("1ROAD_RBC0_"))).toHaveLength(2);
+  });
+
+  it("kerbs the ring in town, sloping the kerb away at each road joining", () => {
+    const m = buildRingMeshes({ ...rb, kerbed: true }, 0, withDefaults({}), "road");
+    expect(m.kerb.map((n) => n.name)).toEqual(["1ROAD_RBGUTTER0", "1KERB_RB0"]);
+    const kerb = m.kerb[1];
+    const top = Math.max(...Array.from({ length: kerb.positions.length / 3 }, (_, i) => kerb.positions[i * 3 + 1]));
+    const Ro = rb.r + rb.w / 2, edge = ringHeight(rb, Ro);
+    expect(top - edge).toBeCloseTo(0.15, 3);
+    // Low where the route crosses the edge.
+    for (const a of rb.crossings) {
+      const x = rb.c[0] + Math.cos(a) * (Ro + 0.4), y = rb.c[1] + Math.sin(a) * (Ro + 0.4);
+      for (let i = 0; i < kerb.positions.length; i += 3) {
+        if (Math.hypot(kerb.positions[i] - x, -kerb.positions[i + 2] - y) < 1) expect(kerb.positions[i + 1] - edge).toBeLessThan(0.02);
+      }
+    }
   });
 
   it("stops the straight road ribbon at the ring", () => {

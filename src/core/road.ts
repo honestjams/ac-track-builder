@@ -16,6 +16,8 @@ export interface RoadSample extends PathFrame {
   h: number;
   /** Cross-slope, metres of rise per metre to the left (negative = left side lower). */
   bank: number;
+  /** Kerb and gutter on the [left, right], 0..1 (absent = none). */
+  kerb?: [number, number];
 }
 
 export interface RoadPlan {
@@ -251,10 +253,13 @@ export class SegmentIndex {
   }
 
   /** Interpolated sample values at a nearest-point result. */
-  at(n: Nearest): { h: number; bank: number; width: number } {
+  at(n: Nearest): { h: number; bank: number; width: number; kerb: number } {
     const s = this.plan.samples;
     const a = s[n.seg], b = s[(n.seg + 1) % s.length];
     const f = n.frac;
-    return { h: a.h + (b.h - a.h) * f, bank: a.bank + (b.bank - a.bank) * f, width: a.width + (b.width - a.width) * f };
+    // Kerb on the side of the road the point is on.
+    const side = n.t >= 0 ? 0 : 1;
+    const ka = a.kerb?.[side] ?? 0, kb = b.kerb?.[side] ?? 0;
+    return { h: a.h + (b.h - a.h) * f, bank: a.bank + (b.bank - a.bank) * f, width: a.width + (b.width - a.width) * f, kerb: ka + (kb - ka) * f };
   }
 }

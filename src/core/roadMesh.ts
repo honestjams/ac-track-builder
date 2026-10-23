@@ -20,7 +20,7 @@ function point(s: RoadSample, t: number, z: number): Vec3 {
 }
 
 /** Section index ranges [start, end] (inclusive) for each chunk. */
-function chunkRanges(plan: RoadPlan): [number, number][] {
+export function chunkRanges(plan: RoadPlan): [number, number][] {
   const n = plan.samples.length;
   const last = plan.closed ? n : n - 1; // closed roads wrap back to sample 0
   const out: [number, number][] = [];

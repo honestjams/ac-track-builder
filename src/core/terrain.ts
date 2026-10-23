@@ -10,6 +10,7 @@ import { MeshBuilder } from "./mesh";
 import type { BuildOptions } from "./options";
 import type { RoadPlan, SegmentIndex } from "./road";
 import { outerRadius, ringHeight } from "./roundabout";
+import { KERB_H, STRIP_EXTRA } from "./kerbs";
 
 export interface TerrainChunk {
   key: string;
@@ -63,7 +64,7 @@ export function makeTerrainFn(plan: RoadPlan, index: SegmentIndex, dem: HeightFn
       if (d > edge + opts.terrainBlend) continue;
       if (d <= edge) return { h: ringHeight(rb, Math.min(d, outerRadius(rb))) - UNDER_ROAD, dist: Math.min(fromRoad.dist, 0) };
       if (fromRoad.dist <= fromRoad.inner) return fromRoad;
-      const base = ringHeight(rb, outerRadius(rb)) - BELOW_VERGE;
+      const base = ringHeight(rb, outerRadius(rb)) - BELOW_VERGE + (rb.kerbed ? BELOW_VERGE + KERB_H - 0.03 : 0);
       const f = smoothstep((d - edge) / opts.terrainBlend);
       const h = base + (dem(x, y) - base) * f;
       // Blend toward whichever feature pulls the ground further from the DEM.
@@ -81,12 +82,13 @@ function roadTerrain(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: B
     if (!n) return { h: ground, dist: Infinity, inner: 0 };
     const v = index.at(n);
     const half = v.width / 2;
-    const inner = half + opts.vergeWidth;
+    // Behind a kerb the ground starts at nature strip height, past the strip.
+    const inner = half + opts.vergeWidth + STRIP_EXTRA * v.kerb;
     const tc = Math.max(-half, Math.min(half, n.t));
     const edge = v.h + v.bank * tc - opts.crown * Math.abs(tc);
     const beyondEnd = !plan.closed && ((n.seg === 0 && n.frac === 0) || (n.seg === lastSeg && n.frac === 1));
     if (!beyondEnd && n.dist <= inner) return { h: edge - UNDER_ROAD, dist: n.dist, inner };
-    const base = edge - BELOW_VERGE;
+    const base = edge - BELOW_VERGE + (BELOW_VERGE + KERB_H - 0.03) * v.kerb;
     const f = smoothstep((n.dist - inner) / opts.terrainBlend);
     return { h: base + (ground - base) * f, dist: n.dist, inner };
   };

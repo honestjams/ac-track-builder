@@ -374,6 +374,7 @@ function readOptions(): Partial<BuildOptions> {
     streetSigns: $<HTMLInputElement>("streetSigns").checked,
     landmarks: $<HTMLInputElement>("landmarks").checked,
     traceRoads: $<HTMLInputElement>("traceRoads").checked,
+    kerbs: $<HTMLInputElement>("kerbs").checked,
   };
 }
 
@@ -509,6 +510,7 @@ function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<Imag
     ["Imagery", [...usedImagery].map((k) => IMAGERY[k].label.replace(" Government", "")).join(" + ") || "none"],
     ["Traced from photos", `${Math.round(s.traced * 100)}% of the road, ${s.photoLines} lines${s.photoChunks ? `, ${s.photoChunks} photo-surfaced stretches` : ""}`],
     ["Side streets", `${s.sideStreets.toLocaleString()} (${s.sideTraced} traced)`],
+    ["Kerb & gutter", `${(s.kerbMetres / 1000).toFixed(2)} km`],
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
     ["Triangles", s.triangles.toLocaleString()],

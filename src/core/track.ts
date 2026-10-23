@@ -13,13 +13,14 @@ import { toAc } from "./mesh";
 import { withDefaults, type BuildOptions } from "./options";
 import { simplify } from "./polyline";
 import { applyElevation, inRoundabout, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
-import { buildRingMeshes, buildRingWall, innerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
+import { buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
+import { buildKerbs, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
 import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1 } from "./dds";
 import { buildMarkings } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, grassTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
   buildGuardRails, buildGuidePosts, buildTrees, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
@@ -106,6 +107,8 @@ export interface TrackResult {
     sideStreets: number;
     /** Side streets traced from the photo. */
     sideTraced: number;
+    /** Kerb and gutter built, metres (both sides counted). */
+    kerbMetres: number;
     streetSigns: number;
     signs: number;
     railMetres: number;
@@ -276,6 +279,7 @@ export async function buildTrack(
   addScenery("signal.png", solidTexture([28, 30, 26]), material("signal", "signal.png", { ambient: 0.4, diffuse: 0.4, specular: 0.2, exp: 20 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
+  addScenery("concrete.png", concreteTexture(), material("concrete", "concrete.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
   addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
   for (const f of FACADES) {
     addScenery(`facade_${f}.png`, facadeTexture(f), material(`facade_${f}`, `facade_${f}.png`, { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
@@ -336,7 +340,8 @@ export async function buildTrack(
     else {
       const cls = sources.roadClassAt?.(proj.toLngLat(mid.pos));
       const nearby = centres.filter(([x, y]) => Math.hypot(x - mid.pos[0], y - mid.pos[1]) < 150).length;
-      kind = /^(motorway|trunk|primary)/.test(cls ?? "") || nearby >= 8 ? "asphalt" : "chipseal";
+      // Kerbed streets are town streets: asphalt.
+      kind = /^(motorway|trunk|primary)/.test(cls ?? "") || nearby >= 8 || !!mid.kerb ? "asphalt" : "chipseal";
     }
     const twoLane = meanWidth >= 5.5;
     const name = `road_${kind}_${twoLane ? 2 : 1}_${ci % 3}`;
@@ -367,7 +372,56 @@ export async function buildTrack(
     }
     return roadMaterial(ci, w, mid);
   };
-  const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % plan.samples.length].s));
+  // Kerb and gutter: read off the photo where the road was traced; in town
+  // they are the rule, so there it takes little evidence (or none, under canopy).
+  const nS = plan.samples.length;
+  let kerbs: [number[], number[]] = [new Array(nS).fill(0), new Array(nS).fill(0)];
+  if (opts.kerbs) {
+    const tr = trace;
+    const evidence = raster && tr ? kerbEvidence(plan, raster, (i) => tr.conf[i] > 0.7) : null;
+    // How built-up it is around each sample (checked every 10 m): 2 = town
+    // (dense houses or a street grid), 1 = edge of town, 0 = country.
+    // Motorways never count. Only real streets count, not driveways and tracks.
+    const streets = streetPlan.streets.filter((st) => /^(primary|secondary|tertiary|minor)/.test(st.cls));
+    const town: number[] = [];
+    plan.samples.forEach((s, i) => {
+      if (i % 5) return town.push(town[i - 1]);
+      const near = (r: number) => ([x, y]: Vec2) => Math.hypot(x - s.pos[0], y - s.pos[1]) < r;
+      const cls = sources.roadClassAt?.(proj.toLngLat(s.pos)) ?? "";
+      if (/^(motorway|trunk)/.test(cls)) return town.push(0);
+      const houses = centres.filter(near(150)).length, grid = streets.filter((st) => st.pts.some(near(120))).length;
+      town.push(houses >= 20 || grid >= 5 ? 2 : houses >= 8 || grid >= 3 ? 1 : 0);
+    });
+    // Kerbs stop clear of a side street's mouth, and wherever the nature
+    // strip would run into another street beside the road.
+    const kerbBlocked = (i: number, side: 1 | -1) => {
+      const s = plan.samples[i];
+      if (streetPlan.junctions.some((j) => j.side === side && Math.abs(j.s - s.s) < j.width / 2 + 4)) return true;
+      const t = (s.width / 2 + opts.vergeWidth + STRIP_EXTRA) * side;
+      return streetIndex.clearance(s.pos[0] + s.left[0] * t, s.pos[1] + s.left[1] * t) < 0.5;
+    };
+    kerbs = planKerbs(plan, evidence, (i) => town[i], kerbBlocked);
+    // A roundabout is kerbed when the road is kerbed coming up to it.
+    for (const rb of plan.roundabouts) {
+      const reach = outerRadius(rb) + 30;
+      rb.kerbed = plan.samples.some((s, i) => (kerbs[0][i] || kerbs[1][i]) && Math.hypot(s.pos[0] - rb.c[0], s.pos[1] - rb.c[1]) < reach);
+    }
+  }
+  const kerbAt = (i: number, side: 1 | -1) => kerbs[side === 1 ? 0 : 1][((i % nS) + nS) % nS] > 0;
+  // The gravel verge gives way to the kerb wherever the kerb is at full height.
+  const kerbInterior = (i: number, side: 1 | -1) => kerbAt(i - 1, side) && kerbAt(i, side) && kerbAt(i + 1, side);
+  const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % nS].s) || kerbInterior(i, side));
+  // Nature strips: the aerial photo of the strip itself when there is one, so footpaths and driveways show.
+  const stripMaterial: StripMaterialFn = (ci, a, b) => {
+    if (!raster || opts.imageryZoom <= 0) return { material: "grass", photo: false };
+    const name = `strip_photo_${String(ci).padStart(3, "0")}`;
+    const tex = stripPhotoTexture(plan, raster, opts, a, b);
+    textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(tex.rgba, tex.width, tex.height) });
+    previewTextures[`${name}.dds`] = tex;
+    materials.push(material(name, `${name}.dds`, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
+    return { material: name, photo: true };
+  };
+  const kerbMeshes = buildKerbs(plan, opts, kerbs, stripMaterial);
   // Photo surface on the traced side streets too (the nearest 40, to keep the file in check).
   const photoStreets = new Set(
     opts.roadSurface === "photo" && raster
@@ -425,14 +479,14 @@ export async function buildTrack(
     ? buildMarkings(plan, opts, (sd) => {
       const p = sampleNear(sd).pos;
       return !!inRoundabout(plan, p[0], p[1], 1);
-    }, mouth, { lines: imageLines, covered }, discreteMarks())
+    }, (side, sd) => mouth(side, sd) || kerbAt(Math.round(sd / opts.spacing), side), { lines: imageLines, covered }, discreteMarks())
     : [];
   // The full circulating carriageway and island of each roundabout.
   const ringNodes: Kn5Node[] = [];
   plan.roundabouts.forEach((rb, k) => {
     const nearest = plan.samples.reduce((a, s) => (Math.abs(s.s - rb.sIn) < Math.abs(a.s - rb.sIn) ? s : a));
     const m = buildRingMeshes(rb, k, opts, roadMaterial(Math.floor(plan.samples.indexOf(nearest) / 120), rb.w, nearest));
-    ringNodes.push(m.road, m.island, m.verge);
+    ringNodes.push(m.road, m.island, m.verge, ...m.kerb);
   });
   const terrainNodes: Kn5Node[] = [];
   for (const [i, chunk] of chunks.entries()) {
@@ -479,8 +533,10 @@ export async function buildTrack(
   // Nor across a side street's mouth.
   needs.forEach((side, k) => side.forEach((_, i) => { if (mouth(k === 0 ? 1 : -1, plan.samples[i].s)) side[i] = false; }));
   needs.forEach((side) => side.forEach((_, i) => { if (nearRing[i]) side[i] = false; }));
+  // Kerbed streets have neither.
+  needs.forEach((side, k) => side.forEach((_, i) => { if (kerbAt(i, k === 0 ? 1 : -1)) side[i] = false; }));
   const rails = buildGuardRails(plan, opts, needs);
-  const postMask = needs.map((side, k) => side.map((v, i) => v || nearRing[i] || mouth(k === 0 ? 1 : -1, plan.samples[i].s))) as [boolean[], boolean[]];
+  const postMask = needs.map((side, k) => side.map((v, i) => v || nearRing[i] || mouth(k === 0 ? 1 : -1, plan.samples[i].s) || kerbAt(i, k === 0 ? 1 : -1))) as [boolean[], boolean[]];
   const posts = opts.guidePosts ? buildGuidePosts(plan, opts, postMask) : [];
   // Inside the corridor buildings stand on the detailed terrain; further out, on the horizon mesh.
   const buildingGround = (x: number, y: number) => {
@@ -516,6 +572,7 @@ export async function buildTrack(
       group("ROUNDABOUTS", [...ringNodes, ...shrubs, ...ringWalls]),
       group("MARKINGS", markings),
       group("VERGE", roadMeshes.verge),
+      group("KERBS", [...kerbMeshes.gutter, ...kerbMeshes.kerb, ...kerbMeshes.strip]),
       group("TERRAIN", terrainNodes),
       group("WALLS", walls),
       group("HORIZON", backdropNodes),
@@ -575,6 +632,7 @@ export async function buildTrack(
       photoChunks: materials.filter((m) => m.name.startsWith("road_photo_")).length,
       sideStreets: streetPlan.streets.length,
       sideTraced,
+      kerbMetres: (kerbs[0].reduce((a, b) => a + b, 0) + kerbs[1].reduce((a, b) => a + b, 0)) * opts.spacing,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,
       railMetres: needs.reduce((n, side) => n + side.filter(Boolean).length * opts.spacing, 0),

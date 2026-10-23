@@ -73,6 +73,8 @@ export interface BuildOptions {
   landmarks: boolean;
   /** Move the road to where the aerial photos show it, at their width. */
   traceRoads: boolean;
+  /** Kerb and gutter where the photos (or a built-up area) show them, instead of a gravel verge. */
+  kerbs: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -110,6 +112,7 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   streetSigns: true,
   landmarks: true,
   traceRoads: true,
+  kerbs: true,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {
