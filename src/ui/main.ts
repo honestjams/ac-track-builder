@@ -8,6 +8,7 @@ import type { BuildOptions } from "../core/options";
 import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
 import { IMAGERY, loadChunkImagery, loadDem } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
+import { renderArt } from "../services/art";
 import { classWidths, fetchTileFeatures, roadClassLookup } from "../services/vectorTiles";
 
 const MAX_KM = 30;
@@ -356,6 +357,9 @@ function readOptions(): Partial<BuildOptions> {
     detectBuildings: $<HTMLSelectElement>("buildings").value === "all",
     roadSurface: $<HTMLSelectElement>("surface").value as BuildOptions["roadSurface"],
     markings: $<HTMLInputElement>("markings").checked,
+    sideStreets: $<HTMLInputElement>("sideStreets").checked,
+    streetSigns: $<HTMLInputElement>("streetSigns").checked,
+    landmarks: $<HTMLInputElement>("landmarks").checked,
   };
 }
 
@@ -422,6 +426,9 @@ $("build").onclick = async () => {
       widthAt,
       osm: osm.features,
       roundabouts: current.roundabouts,
+      streets: tiles ? { lines: tiles.roads, names: tiles.names } : undefined,
+      pois: tiles?.pois,
+      renderArt,
       roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
       imageryCredit: IMAGERY.esri.credit,
     }, placeMeta, report);
@@ -467,6 +474,8 @@ function showStats(r: TrackResult, widthFallback: boolean): void {
     ["Avg width", `${s.meanWidth.toFixed(1)} m${widthFallback ? " (default)" : ""}`],
     ["Trees", s.trees.toLocaleString()],
     ["Buildings", `${s.buildings.toLocaleString()}${s.buildingsDetected ? ` (${s.buildingsDetected} from imagery)` : ""}`],
+    ["Side streets", s.sideStreets.toLocaleString()],
+    ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
     ["Triangles", s.triangles.toLocaleString()],
   ];

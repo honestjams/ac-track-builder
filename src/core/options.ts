@@ -62,6 +62,12 @@ export interface BuildOptions {
   roadSurface: "auto" | "asphalt" | "chipseal";
   /** Edge lines, dividing lines and raised markers. */
   markings: boolean;
+  /** Draw the other streets near the route. */
+  sideStreets: boolean;
+  /** Street name signs where named streets meet the route. */
+  streetSigns: boolean;
+  /** Signs, bus stops and servo canopies from OSM points of interest. */
+  landmarks: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -95,6 +101,9 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   buildingRadius: 250,
   roadSurface: "auto",
   markings: true,
+  sideStreets: true,
+  streetSigns: true,
+  landmarks: true,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

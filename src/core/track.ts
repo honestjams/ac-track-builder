@@ -22,6 +22,9 @@ import {
   buildGuardRails, buildGuidePosts, buildTrees, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
 import { buildBuildings, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
+import { ArtList, type ArtRenderer } from "./art";
+import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
+import { buildSideStreets, LineIndex, planSideStreets, type StreetLine, type StreetName } from "./sideStreets";
 
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
 export type Progress = (stage: string, fraction?: number) => void | Promise<void>;
@@ -40,6 +43,14 @@ export interface DataSources {
   } | null>;
   /** OSM features near the road, already fetched. */
   osm?: OsmFeatures;
+  /** Other streets near the route and their names (vector tiles). */
+  streets?: { lines: StreetLine[]; names: StreetName[] };
+  /** Points of interest near the route (vector tiles). */
+  pois?: { at: LngLat; cls: string; subclass: string; name?: string }[];
+  /** Objects located by street-level imagery (Mapillary map features). */
+  seen?: { at: LngLat; value: string }[];
+  /** Draws the sign artwork atlas; without one, signs are left out. */
+  renderArt?: ArtRenderer;
   /** Roundabouts the router says the route goes round. */
   roundabouts?: RoundaboutHint[];
   /** Road class at a point (OpenMapTiles: motorway, primary, minor, ...). */
@@ -80,6 +91,9 @@ export interface TrackResult {
     trees: number;
     buildings: number;
     buildingsDetected: number;
+    sideStreets: number;
+    streetSigns: number;
+    signs: number;
     railMetres: number;
   };
 }
@@ -227,6 +241,11 @@ export async function buildTrack(
   });
   addScenery("paint.png", paintTexture(), material("paint", "paint.png", { ambient: 0.5, diffuse: 0.5, specular: 0.1, exp: 15 }));
   addScenery("rrpm.png", solidTexture([238, 238, 232]), material("rrpm", "rrpm.png", { ambient: 0.6, diffuse: 0.5, specular: 0.6, exp: 40 }));
+  addScenery("timber.png", solidTexture([92, 74, 58]), material("timber", "timber.png", { ambient: 0.45, diffuse: 0.45, specular: 0, exp: 1 }));
+  addScenery("glass.png", solidTexture([120, 140, 150]), material("glass", "glass.png", { ambient: 0.4, diffuse: 0.3, specular: 0.6, exp: 60 }));
+  addScenery("canopy.png", solidTexture([236, 236, 232]), material("canopy", "canopy.png", { ambient: 0.5, diffuse: 0.45, specular: 0.1, exp: 10 }));
+  addScenery("lamp.png", solidTexture([150, 152, 150]), material("lamp", "lamp.png", { ambient: 0.45, diffuse: 0.45, specular: 0.3, exp: 30 }));
+  addScenery("signal.png", solidTexture([28, 30, 26]), material("signal", "signal.png", { ambient: 0.4, diffuse: 0.4, specular: 0.2, exp: 20 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
@@ -261,11 +280,20 @@ export async function buildTrack(
     }
   }
 
+  // Other streets: planned now so buildings, trees and verges can keep clear.
+  const streetPlan = planSideStreets(
+    opts.sideStreets ? sources.streets?.lines ?? [] : [], sources.streets?.names ?? [], plan, index, opts, proj,
+  );
+  const streetIndex = new LineIndex(streetPlan.streets);
+  const mouth = (side: 1 | -1, sd: number) => streetPlan.junctions.some((j) => j.side === side && Math.abs(j.s - sd) < j.width / 2 + 1.5);
+
   const mapped: Building[] = opts.buildings
     ? (sources.osm?.buildings ?? []).map((b, i) => fromOsm(b.ring.map((p) => proj.toLocal(p)), b.tags, i))
     : [];
   const kept = filterBuildings([...mapped, ...detected], index, opts, opts.buildingRadius)
-    .filter((b) => !b.ring.some(([x, y]) => inRoundabout(plan, x, y, opts.vergeWidth + 2)));
+    .filter((b) => !b.ring.some(([x, y]) => inRoundabout(plan, x, y, opts.vergeWidth + 2)))
+    // Detected roofs on a street are paving, not houses; mapped ones get a little more benefit of the doubt.
+    .filter((b) => !b.ring.some(([x, y]) => streetIndex.clearance(x, y) < (b.source === "detected" ? 1 : -0.5)));
 
   await progress("Building road and terrain meshes");
   // Road surface per chunk: dense asphalt on major roads and in built-up
@@ -292,13 +320,17 @@ export async function buildTrack(
     }
     return name;
   };
-  const roadMeshes = buildRoadMeshes(plan, opts, roadMaterial);
+  const roadMeshes = buildRoadMeshes(plan, opts, roadMaterial, (i, side) => mouth(side, plan.samples[i % plan.samples.length].s));
+  const sideStreets = buildSideStreets(streetPlan.streets, plan, index, opts, (x, y) => terrainAt(x, y).h, (st, i) => {
+    const mid = st.pts[Math.floor(st.pts.length / 2)];
+    return roadMaterial(i, st.width, { ...plan.samples[0], pos: mid });
+  });
   const sampleNear = (sd: number) => plan.samples[Math.max(0, Math.min(plan.samples.length - 1, Math.round(sd / opts.spacing)))];
   const markings = opts.markings
     ? buildMarkings(plan, opts, (sd) => {
       const p = sampleNear(sd).pos;
       return !!inRoundabout(plan, p[0], p[1], 1);
-    })
+    }, mouth)
     : [];
   // The full circulating carriageway and island of each roundabout.
   const ringNodes: Kn5Node[] = [];
@@ -323,7 +355,8 @@ export async function buildTrack(
 
   await progress("Placing scenery");
   const offRings = (spots: TreeSpot[]) => spots.filter((t) => !inRoundabout(plan, t.x, t.y, opts.vergeWidth + 3));
-  const trees = buildTrees(offRings(filterTrees(treeSpots, index, opts, opts.maxTrees)), ground);
+  const offStreets = (spots: TreeSpot[]) => spots.filter((t) => streetIndex.clearance(t.x, t.y) > 1.5);
+  const trees = buildTrees(offStreets(offRings(filterTrees(treeSpots, index, opts, opts.maxTrees))), ground);
   // A tree and a ring of shrubs on each island big enough for them.
   const islandTrees = plan.roundabouts.flatMap((rb) => {
     const ri = innerRadius(rb);
@@ -348,15 +381,32 @@ export async function buildTrack(
   if (!opts.guardRails) needs.forEach((side) => side.fill(false));
   // No rails or posts on or beside a roundabout.
   const nearRing = plan.samples.map((s) => !!inRoundabout(plan, s.pos[0], s.pos[1], 15));
+  // Nor across a side street's mouth.
+  needs.forEach((side, k) => side.forEach((_, i) => { if (mouth(k === 0 ? 1 : -1, plan.samples[i].s)) side[i] = false; }));
   needs.forEach((side) => side.forEach((_, i) => { if (nearRing[i]) side[i] = false; }));
   const rails = buildGuardRails(plan, opts, needs);
-  const postMask = needs.map((side) => side.map((v, i) => v || nearRing[i])) as [boolean[], boolean[]];
+  const postMask = needs.map((side, k) => side.map((v, i) => v || nearRing[i] || mouth(k === 0 ? 1 : -1, plan.samples[i].s))) as [boolean[], boolean[]];
   const posts = opts.guidePosts ? buildGuidePosts(plan, opts, postMask) : [];
   // Inside the corridor buildings stand on the detailed terrain; further out, on the horizon mesh.
   const buildingGround = (x: number, y: number) => {
     const n = index.nearest(x, y, opts.corridor - 1);
     return n ? ground(x, y) : backdropHeight(farDem, index, opts, x, y) - 0.6;
   };
+  // Signs and street furniture; their artwork is drawn in one atlas.
+  const art = new ArtList();
+  const pieces = [
+    ...(opts.streetSigns ? streetSigns(streetPlan, plan, opts, art) : []),
+    ...(opts.landmarks ? landmarks((sources.pois ?? []).map((p) => ({ ...p, at: proj.toLocal(p.at) })), plan, index, opts, art,
+      (x, y) => Math.min(streetIndex.clearance(x, y), ...kept.map((b) => (pointInside(x, y, b.ring) ? -1 : Infinity)))) : []),
+    ...seenFeatures((sources.seen ?? []).map((f) => ({ ...f, at: proj.toLocal(f.at) })), plan, index, opts, art),
+  ];
+  let atlas = null;
+  if (sources.renderArt && art.list.length) {
+    atlas = await sources.renderArt(art.list);
+    textures.push({ name: "signart.png", data: atlas.data });
+    materials.push({ ...material("signart", "signart.png", { ambient: 0.55, diffuse: 0.45, specular: 0.15, exp: 20 }), shader: "ksPerPixelAT", alphaTested: true });
+  }
+  const furniture = buildPieces(pieces, atlas);
   const houses = buildBuildings(opts.horizon > 0 ? kept : kept.filter((b) => b.ring.every(([x, y]) => index.nearest(x, y, opts.corridor - 1))), buildingGround);
 
   const group = (name: string, children: Kn5Node[]): Kn5GroupNode => ({ kind: "node", name, transform: IDENTITY, children });
@@ -366,6 +416,8 @@ export async function buildTrack(
     materials,
     root: group(slug, [
       group("ROAD", roadMeshes.road),
+      group("SIDESTREETS", sideStreets),
+      group("FURNITURE", furniture),
       group("ROUNDABOUTS", [...ringNodes, ...shrubs, ...ringWalls]),
       group("MARKINGS", markings),
       group("VERGE", roadMeshes.verge),
@@ -423,7 +475,19 @@ export async function buildTrack(
       trees: trees.reduce((n, m) => n + (m.kind === "mesh" ? m.positions.length / 3 / 24 : 0), 0),
       buildings: kept.length,
       buildingsDetected: kept.filter((b) => b.source === "detected").length,
+      sideStreets: streetPlan.streets.length,
+      streetSigns: pieces.filter((p) => p.kind === "blade").length,
+      signs: pieces.filter((p) => p.kind === "face").length,
       railMetres: needs.reduce((n, side) => n + side.filter(Boolean).length * opts.spacing, 0),
     },
   };
+}
+
+function pointInside(x: number, y: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }

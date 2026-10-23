@@ -36,7 +36,13 @@ export interface RoadMeshes {
 /** Picks the road material for chunk `ci` (mean width, middle sample). */
 export type RoadMaterialFn = (ci: number, meanWidth: number, mid: RoadSample) => string;
 
-export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions, materialFor: RoadMaterialFn): RoadMeshes {
+export function buildRoadMeshes(
+  plan: RoadPlan,
+  opts: BuildOptions,
+  materialFor: RoadMaterialFn,
+  /** Leave the verge out here (a side street's mouth). Side 1 = left. */
+  vergeGap: (i: number, side: 1 | -1) => boolean = () => false,
+): RoadMeshes {
   const samples = plan.samples;
   const n = samples.length;
   const at = (i: number) => samples[i % n];
@@ -92,10 +98,14 @@ export function buildRoadMeshes(plan: RoadPlan, opts: BuildOptions, materialFor:
       for (let r = 0; r < b - a; r++) {
         if (onRing(a + r) || onRing(a + r + 1)) continue;
         const p = r * 6, q = p + 6;
-        vb.quad(p, p + 1, q + 1, q);
-        vb.quad(p + 1, p + 2, q + 2, q + 1);
-        vb.quad(p + 3, p + 4, q + 4, q + 3);
-        vb.quad(p + 4, p + 5, q + 5, q + 4);
+        if (!vergeGap(a + r, 1) && !vergeGap(a + r + 1, 1)) {
+          vb.quad(p, p + 1, q + 1, q);
+          vb.quad(p + 1, p + 2, q + 2, q + 1);
+        }
+        if (!vergeGap(a + r, -1) && !vergeGap(a + r + 1, -1)) {
+          vb.quad(p + 3, p + 4, q + 4, q + 3);
+          vb.quad(p + 4, p + 5, q + 5, q + 4);
+        }
       }
       verge.push(vb.toKn5(`1GRASS_VERGE_${pad(ci)}`, "verge"));
     }

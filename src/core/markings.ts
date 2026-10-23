@@ -140,6 +140,8 @@ export function buildMarkings(
   opts: BuildOptions,
   /** Distances along the road to leave unmarked (e.g. inside roundabouts). */
   skip: (s: number) => boolean = () => false,
+  /** Where an edge line breaks for a side street (side 1 = left). */
+  edgeGap: (side: 1 | -1, s: number) => boolean = () => false,
 ): Kn5MeshNode[] {
   const paint = new ChunkedMesh(0);
   const rrpm = new ChunkedMesh(0);
@@ -188,9 +190,10 @@ export function buildMarkings(
   const twoLane = (i: number) => samples[i].width >= MIN_TWO_LANE;
 
   // Edge lines, 0.2 m in from the seal edge.
-  for (const [a, b] of runs(twoLane)) {
-    stripe(a, b, (p) => p.width / 2 - 0.2);
-    stripe(a, b, (p) => -(p.width / 2 - 0.2));
+  for (const side of [1, -1] as const) {
+    for (const [a, b] of runs((i) => twoLane(i) && !edgeGap(side, samples[i].s))) {
+      stripe(a, b, (p) => side * (p.width / 2 - 0.2));
+    }
   }
 
   // Dividing line.

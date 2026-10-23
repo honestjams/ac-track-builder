@@ -178,7 +178,7 @@ export function buildTrees(spots: TreeSpot[], ground: HeightFn, name = "TREES"):
  * Axis-aligned-to-the-road box: `along` is the unit direction of its length.
  * Faces wind counter-clockwise from outside.
  */
-function box(mb: MeshBuilder, c: Vec2, along: Vec2, length: number, depth: number, z0: number, z1: number): void {
+export function box(mb: MeshBuilder, c: Vec2, along: Vec2, length: number, depth: number, z0: number, z1: number): void {
   const ax = along[0] * length / 2, ay = along[1] * length / 2;
   const bx = -along[1] * depth / 2, by = along[0] * depth / 2;
   const corners: Vec2[] = [

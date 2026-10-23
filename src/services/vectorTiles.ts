@@ -31,6 +31,30 @@ export interface TileRoad {
   pts: LngLat[];
   cls: string;
   surface?: string;
+  /** "bridge" or "tunnel" when the road is grade separated. */
+  brunnel?: string;
+}
+
+/** A named road line (transportation_name layer). */
+export interface TileName {
+  pts: LngLat[];
+  name: string;
+  cls: string;
+}
+
+export interface TilePoi {
+  at: LngLat;
+  cls: string;
+  subclass: string;
+  name?: string;
+  rank?: number;
+}
+
+export interface TileFeatures {
+  buildings: TileBuilding[];
+  roads: TileRoad[];
+  names: TileName[];
+  pois: TilePoi[];
 }
 
 type P = { x: number; y: number };
@@ -69,7 +93,7 @@ function signedArea(r: P[]): number {
 }
 
 /** Buildings and roads from every z14 tile covering [west, south, east, north]. */
-export async function fetchTileFeatures(bbox: [number, number, number, number]): Promise<{ buildings: TileBuilding[]; roads: TileRoad[] }> {
+export async function fetchTileFeatures(bbox: [number, number, number, number]): Promise<TileFeatures> {
   const url = await tileTemplate();
   const [w, s, e, n] = bbox;
   const a = lngLatToPixel([w, n], Z), b = lngLatToPixel([e, s], Z);
@@ -77,6 +101,8 @@ export async function fetchTileFeatures(bbox: [number, number, number, number]):
   if ((x1 - x0 + 1) * (y1 - y0 + 1) > 400) throw new Error("Area too large for building tiles");
   const buildings: TileBuilding[] = [];
   const roads: TileRoad[] = [];
+  const names: TileName[] = [];
+  const pois: TilePoi[] = [];
   const jobs: Promise<void>[] = [];
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
@@ -103,13 +129,39 @@ export async function fetchTileFeatures(bbox: [number, number, number, number]):
           if (f.type !== 2) continue;
           const cls = String(f.properties.class ?? "");
           const surface = f.properties.surface !== undefined ? String(f.properties.surface) : undefined;
-          for (const line of f.loadGeometry()) roads.push({ pts: line.map((p) => toLngLat(p, tl.extent)), cls, surface });
+          const brunnel = f.properties.brunnel !== undefined ? String(f.properties.brunnel) : undefined;
+          for (const line of f.loadGeometry()) roads.push({ pts: line.map((p) => toLngLat(p, tl.extent)), cls, surface, brunnel });
+        }
+        const nl = tile.layers.transportation_name;
+        for (let i = 0; nl && i < nl.length; i++) {
+          const f = nl.feature(i);
+          const name = f.properties.name;
+          if (f.type !== 2 || !name) continue;
+          for (const line of f.loadGeometry()) {
+            names.push({ pts: line.map((p) => toLngLat(p, nl.extent)), name: String(name), cls: String(f.properties.class ?? "") });
+          }
+        }
+        const pl = tile.layers.poi;
+        for (let i = 0; pl && i < pl.length; i++) {
+          const f = pl.feature(i);
+          if (f.type !== 1) continue;
+          const pr = f.properties;
+          const [pt] = f.loadGeometry()[0];
+          // Points in the tile's buffer show up in two tiles; keep the owner's copy.
+          if (pt.x < 0 || pt.y < 0 || pt.x >= pl.extent || pt.y >= pl.extent) continue;
+          pois.push({
+            at: toLngLat(pt, pl.extent),
+            cls: String(pr.class ?? ""),
+            subclass: String(pr.subclass ?? ""),
+            name: pr.name !== undefined ? String(pr.name) : undefined,
+            rank: typeof pr.rank === "number" ? pr.rank : undefined,
+          });
         }
       })().catch(() => undefined));
     }
   }
   await Promise.all(jobs);
-  return { buildings, roads };
+  return { buildings, roads, names, pois };
 }
 
 /** Typical asphalt width by OpenMapTiles road class, metres. */
