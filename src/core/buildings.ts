@@ -30,7 +30,8 @@ export interface Building {
   roofColour: number;
   /** Index into FACADES. */
   facade: number;
-  source: "osm" | "detected";
+  /** Mapped, a roof patch found in the photo, or a house found along a street frontage. */
+  source: "osm" | "detected" | "frontage";
 }
 
 const ROOF_PITCH = Math.tan((22 * Math.PI) / 180);
@@ -44,7 +45,7 @@ export function ringArea(r: Vec2[]): number {
   return a / 2;
 }
 
-function pointInRing(x: number, y: number, ring: Vec2[]): boolean {
+export function pointInRing(x: number, y: number, ring: Vec2[]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const [xi, yi] = ring[i], [xj, yj] = ring[j];
@@ -53,7 +54,7 @@ function pointInRing(x: number, y: number, ring: Vec2[]): boolean {
   return inside;
 }
 
-function centroid(ring: Vec2[]): Vec2 {
+export function centroid(ring: Vec2[]): Vec2 {
   const n = ring.length;
   return [ring.reduce((a, p) => a + p[0], 0) / n, ring.reduce((a, p) => a + p[1], 0) / n];
 }
@@ -70,7 +71,7 @@ export function buildingHeight(tags: Record<string, string>): number {
   return 6;
 }
 
-function nearestRoofColour(rgb: [number, number, number]): number {
+export function nearestRoofColour(rgb: [number, number, number]): number {
   let best = 0, bestD = Infinity;
   ROOF_COLOURS.forEach((c, i) => {
     // Aerial photos read a little dark and hazy; compare after a mild lift.
@@ -260,7 +261,7 @@ export function filterBuildings(buildings: Building[], index: SegmentIndex, opts
   const mapped = buildings.filter((b) => b.source === "osm");
   return buildings.filter((b) => {
     if (b.ring.length < 3 || Math.abs(ringArea(b.ring)) < 6) return false;
-    if (b.source === "detected") {
+    if (b.source !== "osm") {
       const [cx, cy] = centroid(b.ring);
       if (mapped.some((o) => pointInRing(cx, cy, o.ring) || b.ring.some(([x, y]) => pointInRing(x, y, o.ring)))) return false;
     }

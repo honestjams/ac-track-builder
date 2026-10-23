@@ -24,7 +24,8 @@ import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, grass
 import {
   buildGuardRails, buildGuidePosts, buildTrees, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
-import { buildBuildings, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
+import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
+import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
@@ -289,6 +290,7 @@ export async function buildTrack(
   }
   const detected: Building[] = [];
   const treeSpots: TreeSpot[] = [];
+  const photos: Parameters<typeof chunkPhotoSampler>[0] = [];
 
   const textured = new Set<string>();
   if (sources.imagery && opts.imageryZoom > 0) {
@@ -308,6 +310,7 @@ export async function buildTrack(
       if (img.rgba && job.prefix === "terrain") {
         treeSpots.push(...treeSpotsFromImagery(img.rgba, job.size, job.chunk, opts.trees));
         if (opts.buildings && opts.detectBuildings) detected.push(...detectBuildings(img.rgba, job.size, job.chunk));
+        photos.push({ chunk: job.chunk, rgba: img.rgba, size: job.size });
       }
     }
   }
@@ -323,10 +326,36 @@ export async function buildTrack(
   const mapped: Building[] = opts.buildings
     ? (sources.osm?.buildings ?? []).map((b, i) => fromOsm(b.ring.map((p) => proj.toLocal(p)), b.tags, i))
     : [];
-  const kept = filterBuildings([...mapped, ...detected], index, opts, opts.buildingRadius)
+  // A house on every lot along the streets, where the photo shows a roof there.
+  const photo = chunkPhotoSampler(photos);
+  const frontage = photo && opts.buildings && opts.detectBuildings ? (() => {
+    const realStreets = streetPlan.streets.filter((st) => /^(primary|secondary|tertiary|minor)/.test(st.cls));
+    const known = [...mapped, ...detected].map((b) => centroid(b.ring));
+    const cache = new Map<string, boolean>();
+    const builtUp = (x: number, y: number) => {
+      const key = `${Math.floor(x / 50)},${Math.floor(y / 50)}`;
+      let v = cache.get(key);
+      if (v === undefined) {
+        const cx = (Math.floor(x / 50) + 0.5) * 50, cy = (Math.floor(y / 50) + 0.5) * 50;
+        const near = (r: number) => ([px, py]: Vec2) => Math.hypot(px - cx, py - cy) < r;
+        v = known.filter(near(150)).length >= 4 || realStreets.filter((st) => st.pts.some(near(120))).length >= 3;
+        cache.set(key, v);
+      }
+      return v;
+    };
+    const onRoad = (x: number, y: number) => {
+      const n = index.nearest(x, y, 30);
+      return (!!n && n.dist < index.at(n).width / 2 + 1) || streetIndex.clearance(x, y) < 1;
+    };
+    return frontageHouses([
+      { pts: plan.samples.map((s) => s.pos), half: plan.samples.map((s) => s.width / 2) },
+      ...streetPlan.streets.map((st) => ({ pts: st.pts, half: st.pts.map((_, i) => (st.widths?.[i] ?? st.width) / 2) })),
+    ], photo, onRoad, builtUp, [...mapped, ...detected], plan.samples.length);
+  })() : [];
+  const kept = filterBuildings([...mapped, ...detected, ...frontage], index, opts, opts.buildingRadius)
     .filter((b) => !b.ring.some(([x, y]) => inRoundabout(plan, x, y, opts.vergeWidth + 2)))
     // Detected roofs on a street are paving, not houses; mapped ones get a little more benefit of the doubt.
-    .filter((b) => !b.ring.some(([x, y]) => streetIndex.clearance(x, y) < (b.source === "detected" ? 1 : -0.5)));
+    .filter((b) => !b.ring.some(([x, y]) => streetIndex.clearance(x, y) < (b.source !== "osm" ? 1 : -0.5)));
 
   await progress("Building road and terrain meshes");
   // Road surface per chunk: dense asphalt on major roads and in built-up
@@ -630,7 +659,7 @@ export async function buildTrack(
       kn5Bytes: kn5.length,
       trees: trees.reduce((n, m) => n + (m.kind === "mesh" ? m.positions.length / 3 / 24 : 0), 0),
       buildings: kept.length,
-      buildingsDetected: kept.filter((b) => b.source === "detected").length,
+      buildingsDetected: kept.filter((b) => b.source !== "osm").length,
       traced: trace?.coverage ?? 0,
       photoLines: imageLines.length,
       photoChunks: materials.filter((m) => m.name.startsWith("road_photo_")).length,

@@ -55,7 +55,9 @@ everything runs client-side: no server, no account, no queue.
   where the ground drops away beside the road (or where OSM maps one), white
   guide posts, and buildings: OSM footprints where mapped, plus placeholder
   houses wherever the imagery shows a roof, with Colorbond or terracotta
-  roofs in the matching colour.
+  roofs in the matching colour. In built-up areas every street frontage is
+  read from the photo too, so each lot gets its house, square to the street
+  at the setback and depth the photo shows.
 - Invisible walls that keep you on the road and pull in where switchbacks
   pass close to each other.
 - Pit boxes, a starting grid, hotlap start, A-to-B start/finish timing (or a
@@ -110,6 +112,7 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/terrain.ts`, `backdrop.ts` | Drivable terrain corridor and horizon scenery |
 | `src/core/scenery.ts` | Trees from imagery, guard rails, guide posts |
 | `src/core/buildings.ts` | OSM footprints and roofs detected in imagery, gable roofs |
+| `src/core/frontage.ts` | Houses read off the photo along each street frontage |
 | `src/core/markings.ts` | Edge and dividing lines from sight distance, pavement markers |
 | `src/core/sideStreets.ts` | Other streets near the route and their junctions |
 | `src/core/furniture.ts`, `art.ts` | Street name signs, landmarks, bus stops, Mapillary objects; the sign artwork atlas |
