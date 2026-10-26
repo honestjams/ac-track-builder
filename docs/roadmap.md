@@ -12,8 +12,7 @@ Rough priority order. Each chunk is a self-contained change.
 3. ~~**Truer road edges.**~~ Done: traced from the aerial photo, with line
    markings and an optional photo surface, side streets traced too, kerb
    and gutter in town, turn arrows and painted numbers. Next: painted words
-   (KEEP CLEAR, BUS), bicycle symbols, kerb returns round the
-   corners of side streets, footpaths as their own surface.
+   (KEEP CLEAR, BUS), bicycle symbols, footpaths as their own surface.
 4. **Higher-resolution elevation.** Done for Queensland (the state's
    bare-earth lidar model), NSW (5 m) and Victoria (10 m). Next: USGS 3DEP 1 m,
    Japan GSI 5 m.

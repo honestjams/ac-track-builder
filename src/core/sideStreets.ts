@@ -215,6 +215,36 @@ function norm(v: Vec2): Vec2 {
 }
 
 /**
+ * Height of a street's surface at lateral offset `t` (+ left) from its point
+ * k: 10 cm above the ground, blending down over the last 10 m to a junction
+ * to sit 2 cm under the route's surface.
+ */
+export function streetSurface(plan: RoadPlan, index: SegmentIndex, opts: BuildOptions, ground: HeightFn) {
+  const routeSurface = (x: number, y: number) => {
+    const near = index.nearest(x, y, 40);
+    if (!near) return ground(x, y);
+    const s = plan.samples[near.seg];
+    return surfaceHeight(s, near.t, opts.crown);
+  };
+  return (st: SideStreet, k: number, t: number) => {
+    const n = st.pts.length;
+    const a = st.pts[Math.max(0, k - 1)], b = st.pts[Math.min(n - 1, k + 1)];
+    const d = norm([b[0] - a[0], b[1] - a[1]]);
+    const x = st.pts[k][0] - d[1] * t, y = st.pts[k][1] + d[0] * t;
+    const draped = ground(x, y) + 0.1;
+    let along = 0, dJoin = Infinity;
+    const at: number[] = [0];
+    for (let q = 1; q < n; q++) at.push(at[q - 1] + Math.hypot(st.pts[q][0] - st.pts[q - 1][0], st.pts[q][1] - st.pts[q - 1][1]));
+    along = at[k];
+    for (const j of st.joins) dJoin = Math.min(dJoin, Math.abs(along - at[j]));
+    if (dJoin >= 10) return draped;
+    const r = routeSurface(x, y) - 0.02;
+    const f = dJoin / 10;
+    return r + (draped - r) * f * f * (3 - 2 * f);
+  };
+}
+
+/**
  * Draped ribbons. Each street sits 10 cm above the ground; at a junction it
  * blends down to the route's surface over 10 m and tucks 2 cm under the
  * route's edge so the two never fight.
@@ -229,38 +259,24 @@ export function buildSideStreets(
 ): Kn5MeshNode[] {
   const out: Kn5MeshNode[] = [];
   const meshes = new Map<string, ChunkedMesh>();
+  const surface = streetSurface(plan, index, opts, ground);
   streets.forEach((st, si) => {
     const choice = materialFor(st, si);
     const mat = typeof choice === "string" ? choice : choice.material;
     if (!meshes.has(mat)) meshes.set(mat, new ChunkedMesh(0));
     const mb = meshes.get(mat)!.next(st.pts.length * 2);
     const n = st.pts.length;
-    // Distance from each point to the nearest join, along the street.
     const along = [0];
     for (let k = 1; k < n; k++) along.push(along[k - 1] + Math.hypot(st.pts[k][0] - st.pts[k - 1][0], st.pts[k][1] - st.pts[k - 1][1]));
-    const routeSurface = (x: number, y: number) => {
-      const near = index.nearest(x, y, 40);
-      if (!near) return ground(x, y);
-      const s = plan.samples[near.seg];
-      return surfaceHeight(s, near.t, opts.crown);
-    };
     const base = mb.vertexCount;
     for (let k = 0; k < n; k++) {
       const a = st.pts[Math.max(0, k - 1)], b = st.pts[Math.min(n - 1, k + 1)];
       const t = norm([b[0] - a[0], b[1] - a[1]]);
       const left: Vec2 = [-t[1], t[0]];
-      const dJoin = Math.min(Infinity, ...st.joins.map((j) => Math.abs(along[k] - along[j])));
       const w = st.widths?.[k] ?? st.width;
       for (const side of [1, -1]) {
         const x = st.pts[k][0] + left[0] * side * w / 2, y = st.pts[k][1] + left[1] * side * w / 2;
-        const draped = ground(x, y) + 0.1;
-        let z = draped;
-        if (dJoin < 10) {
-          const r = routeSurface(x, y) - 0.02;
-          const f = dJoin / 10;
-          z = r + (draped - r) * f * f * (3 - 2 * f);
-        }
-        mb.vertex([x, y, z], side > 0 ? 0 : 1, typeof choice === "string" ? along[k] / SEAL_LENGTH : along[k] / Math.max(1, along[n - 1]));
+        mb.vertex([x, y, surface(st, k, side * w / 2)], side > 0 ? 0 : 1, typeof choice === "string" ? along[k] / SEAL_LENGTH : along[k] / Math.max(1, along[n - 1]));
       }
     }
     for (let k = 0; k < n - 1; k++) {

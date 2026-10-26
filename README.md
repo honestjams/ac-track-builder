@@ -30,8 +30,9 @@ everything runs client-side: no server, no account, no queue.
   physics surface, mountable but felt) and a nature strip textured from the
   aerial photo, so footpaths and driveways show. Out of town only where the
   photo clearly shows one. Kerbs curve round the corners into side
-  streets, and roundabouts in town get a kerbed ring too, open wherever a
-  road joins it. A kerb never stands on drivable road.
+  streets and carry on along them for 40 m, and roundabouts in town get a
+  kerbed ring too, open wherever a road joins it. A kerb never stands on
+  drivable road.
 - Low-detail horizon terrain out to 1.5 km so the world doesn't end at the
   roadside.
 - Australian road surfaces: chip seal on rural roads, dense asphalt on major

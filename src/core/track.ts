@@ -31,7 +31,7 @@ import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, displayOf, traceRoad, type RasterSampler, type TraceResult } from "./trace";
-import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, type StreetLine, type StreetName } from "./sideStreets";
+import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, streetSurface, type StreetLine, type StreetName } from "./sideStreets";
 
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
 export type Progress = (stage: string, fraction?: number) => void | Promise<void>;
@@ -505,11 +505,55 @@ export async function buildTrack(
     materials.push(material(name, `${name}.dds`, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
     return { material: name, photo: true };
   };
-  // Round the corners into side streets, then along the road.
+  // Kerbs round the corners into side streets, carrying on along each one's first 40 m; then along the road.
+  const surface = streetSurface(plan, index, opts, (x, y) => terrainAt(x, y).h);
+  const streetAt = streetPlan.junctions.map((j) => {
+    const s = plan.samples[j.seg], half = s.width / 2;
+    const o: Vec2 = [s.pos[0] + s.left[0] * j.side * half, s.pos[1] + s.left[1] * j.side * half];
+    for (const st of streetPlan.streets) {
+      for (const k of st.joins) if (Math.hypot(st.pts[k][0] - o[0], st.pts[k][1] - o[1]) < 4) return { st, k };
+    }
+    return null;
+  });
+  const streetEdge = (ji: number, c: -1 | 1, R: number) => {
+    const m = streetAt[ji];
+    if (!m) return null;
+    const { st, k: k0 } = m;
+    const n = st.pts.length, step = k0 === 0 ? 1 : -1;
+    const tan = plan.samples[streetPlan.junctions[ji].seg].tan;
+    const dirAt = (k: number): Vec2 => {
+      const a = st.pts[Math.max(0, k - 1)], b = st.pts[Math.min(n - 1, k + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      return [(b[0] - a[0]) / l, (b[1] - a[1]) / l];
+    };
+    // Which side of the street this corner is on (the street's own left, in its point order).
+    const d0 = dirAt(k0);
+    const sideSt = tan[0] * c * -d0[1] + tan[1] * c * d0[0] >= 0 ? 1 : -1;
+    const out: { pos: [number, number]; out: [number, number]; z: number }[] = [];
+    let dist = 0;
+    for (let k = k0; k >= 0 && k < n; k += step) {
+      if (k !== k0) dist += Math.hypot(st.pts[k][0] - st.pts[k - step][0], st.pts[k][1] - st.pts[k - step][1]);
+      if (dist < R) continue;
+      if (dist > R + 40) break;
+      const d = dirAt(k), left: [number, number] = [-d[1] * sideSt, d[0] * sideSt];
+      const w = (st.widths?.[k] ?? st.width) / 2;
+      const pos: [number, number] = [st.pts[k][0] + left[0] * w, st.pts[k][1] + left[1] * w];
+      // Stop short of the route (the street's far end) or a roundabout.
+      const near = index.nearest(pos[0], pos[1], 30);
+      if (dist > R + 4 && near && near.dist < index.at(near).width / 2 + 4) break;
+      if (inRoundabout(plan, pos[0], pos[1], 4)) break;
+      out.push({ pos, out: left, z: surface(st, k, sideSt * w) });
+    }
+    return out.length > 4 ? out : null;
+  };
   const returns = opts.kerbs
-    ? buildKerbReturns(plan, opts, streetPlan.junctions, kerbs, roadMaterial(0, 6, { ...plan.samples[0], kerb: [1, 1] }), raster && opts.imageryZoom > 0 ? displayOf(raster) : undefined)
+    ? buildKerbReturns(plan, opts, streetPlan.junctions, kerbs, roadMaterial(0, 6, { ...plan.samples[0], kerb: [1, 1] }), raster && opts.imageryZoom > 0 ? displayOf(raster) : undefined, streetEdge, photo ?? undefined)
     : null;
   const kerbReturns = returns?.nodes ?? [];
+  if (returns?.sideAtlas) {
+    textures.push({ name: "sidestrips_photo.dds", data: encodeDdsDxt1(returns.sideAtlas.rgba, returns.sideAtlas.width, returns.sideAtlas.height) });
+    previewTextures["sidestrips_photo.dds"] = returns.sideAtlas;
+    materials.push(material("sidestrips_photo", "sidestrips_photo.dds", { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
+  }
   if (returns?.atlas) {
     textures.push({ name: "returns_photo.dds", data: encodeDdsDxt1(returns.atlas.rgba, returns.atlas.width, returns.atlas.height) });
     previewTextures["returns_photo.dds"] = returns.atlas;

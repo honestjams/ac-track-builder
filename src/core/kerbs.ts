@@ -312,7 +312,24 @@ export function buildKerbReturns(
   fillMaterial: string,
   /** The aerial photo: the strips inside the returns are textured from it (one atlas cell per corner). */
   photo?: RasterSampler,
-): { nodes: Kn5MeshNode[]; noRamp: Set<string>; atlas?: { rgba: Uint8Array; width: number; height: number } } {
+  /**
+   * Where the side street is kerbed too: its edge on the corner's side
+   * (corner c = -1 before the mouth, 1 after), from R metres in from the
+   * road's edge, as points with the street surface height there and the
+   * direction away from the street. The return then runs on along it.
+   */
+  streetEdge?: (j: number, c: -1 | 1, R: number) => { pos: [number, number]; out: [number, number]; z: number }[] | null,
+  /** Photo for the strips along side streets (they reach beyond the route photo): one atlas column per run. */
+  streetPhoto?: RasterSampler,
+): {
+  nodes: Kn5MeshNode[];
+  noRamp: Set<string>;
+  atlas?: { rgba: Uint8Array; width: number; height: number };
+  sideAtlas?: { rgba: Uint8Array; width: number; height: number };
+} {
+  const SIDE_W = 32, SIDE_H = 512, SIDE_COLS = 64;
+  const sideAtlas = streetPhoto ? new Uint8Array(SIDE_W * SIDE_COLS * SIDE_H * 4) : undefined;
+  let sideRuns = 0;
   const noRamp = new Set<string>();
   const CELL = 64, PER_ROW = 16, ATLAS = CELL * PER_ROW;
   const atlas = photo ? new Uint8Array(ATLAS * ATLAS * 4) : undefined;
@@ -320,13 +337,15 @@ export function buildKerbReturns(
   const n = plan.samples.length;
   const spacing = n > 1 ? plan.samples[1].s - plan.samples[0].s : 2;
   const gutter = new MeshBuilder(), kb = new MeshBuilder(), strip = new MeshBuilder(), fill = new MeshBuilder();
+  // Along side streets: their gutter is street, not route; the strip is photo where the atlas has room, else grass.
+  const sideGutter = new MeshBuilder(), sideStrip = new MeshBuilder(), sideGrass = new MeshBuilder();
   const STEPS = 8;
-  for (const j of junctions) {
+  junctions.forEach((j, ji) => {
     const s = plan.samples[j.seg];
     const side = j.side, k = side === 1 ? 0 : 1;
     const v: [number, number] = [s.left[0] * side, s.left[1] * side], u = s.tan;
-    if (j.dir[0] * v[0] + j.dir[1] * v[1] < 0.8) continue; // oblique: leave it square
-    if (inRoundabout(plan, s.pos[0], s.pos[1], 15)) continue;
+    if (j.dir[0] * v[0] + j.dir[1] * v[1] < 0.8) return; // oblique: leave it square
+    if (inRoundabout(plan, s.pos[0], s.pos[1], 15)) return;
     const half = s.width / 2, e = surfaceHeight(s, half * side, opts.crown);
     const O: [number, number] = [s.pos[0] + v[0] * half, s.pos[1] + v[1] * half];
     for (const c of [-1, 1] as const) {
@@ -365,8 +384,9 @@ export function buildKerbReturns(
         (cx + (p[0] - (C[0] - R)) / (2 * R)) / PER_ROW,
         (cy + ((C[1] + R) - p[1]) / (2 * R)) / PER_ROW,
       ];
-      // The kerb slopes away over the last quarter of the curve, where the side street (which has none) begins.
-      const kAt = (q: number) => Math.min(1, (1 - q) / 0.25);
+      // The kerb slopes away over the last quarter of the curve, where the side street begins, unless it carries on along it.
+      const edge = streetEdge?.(ji, c, R) ?? null;
+      const kAt = (q: number) => (edge && edge.length > 1 ? 1 : Math.min(1, (1 - q) / 0.25));
       const profile = (q: number) => {
         const kk = kAt(q);
         const top = e + KERB_H * kk;
@@ -405,14 +425,98 @@ export function buildKerbReturns(
         fill.vertex([...at(tb, R), e - 0.01], 1, 1);
         upTri(fill, i);
       }
+      if (edge && edge.length > 1) {
+        const col = sideAtlas && sideRuns < SIDE_COLS ? sideRuns++ : -1;
+        if (col >= 0) paintRun(edge, streetPhoto!, sideAtlas!, col, SIDE_W, SIDE_H, SIDE_COLS);
+        alongStreet(edge, { gutter: sideGutter, kb, strip: col >= 0 ? sideStrip : sideGrass }, col >= 0 ? { col, cols: SIDE_COLS } : undefined);
+      }
     }
-  }
+  });
   const nodes: Kn5MeshNode[] = [];
   if (gutter.indices.length) nodes.push(gutter.toKn5("1ROAD_GUTTER_RET", "concrete"));
   if (kb.indices.length) nodes.push(kb.toKn5("1KERB_RET", "concrete"));
   if (strip.indices.length) nodes.push(strip.toKn5("1GRASS_STRIP_RET", atlas && cells ? "returns_photo" : "grass"));
   if (fill.indices.length) nodes.push(fill.toKn5("1STREET_RETFILL", fillMaterial));
-  return { nodes, noRamp, atlas: atlas && cells ? { rgba: atlas, width: ATLAS, height: ATLAS } : undefined };
+  if (sideGutter.indices.length) nodes.push(sideGutter.toKn5("1STREET_GUTTER_SIDE", "concrete"));
+  if (sideStrip.indices.length) nodes.push(sideStrip.toKn5("1GRASS_STRIP_SIDE", "sidestrips_photo"));
+  if (sideGrass.indices.length) nodes.push(sideGrass.toKn5("1GRASS_STRIP_SIDEG", "grass"));
+  return {
+    nodes,
+    noRamp,
+    atlas: atlas && cells ? { rgba: atlas, width: ATLAS, height: ATLAS } : undefined,
+    sideAtlas: sideAtlas && sideRuns ? { rgba: sideAtlas, width: SIDE_W * SIDE_COLS, height: SIDE_H } : undefined,
+  };
+}
+
+/**
+ * Kerb along a side street's edge: the same gutter, kerb and strip as the
+ * road's, sloping away over the last 4 m.
+ */
+const SIDE_STRIP = 2;
+
+/** One run's strip (kerb back to 2 m beyond, along the run) painted from the photo into atlas column `col`. */
+function paintRun(edge: { pos: [number, number]; out: [number, number] }[], photo: RasterSampler, atlas: Uint8Array, col: number, W: number, H: number, cols: number): void {
+  const dist = [0];
+  for (let i = 1; i < edge.length; i++) dist.push(dist[i - 1] + Math.hypot(edge[i].pos[0] - edge[i - 1].pos[0], edge[i].pos[1] - edge[i - 1].pos[1]));
+  const total = dist[dist.length - 1] || 1;
+  let i = 0;
+  for (let y = 0; y < H; y++) {
+    const d = ((y + 0.5) / H) * total;
+    while (i < edge.length - 2 && dist[i + 1] < d) i++;
+    const f = Math.max(0, Math.min(1, (d - dist[i]) / Math.max(1e-6, dist[i + 1] - dist[i])));
+    const a = edge[i], b = edge[i + 1];
+    const px = a.pos[0] + (b.pos[0] - a.pos[0]) * f, py = a.pos[1] + (b.pos[1] - a.pos[1]) * f;
+    for (let x = 0; x < W; x++) {
+      const o = KERB_BACK + ((x + 0.5) / W) * SIDE_STRIP;
+      const c = photo(px + a.out[0] * o, py + a.out[1] * o) ?? [0.33, 0.4, 0.24];
+      const k = (y * W * cols + col * W + x) * 4;
+      atlas[k] = c[0] * 255;
+      atlas[k + 1] = c[1] * 255;
+      atlas[k + 2] = c[2] * 255;
+      atlas[k + 3] = 255;
+    }
+  }
+}
+
+function alongStreet(
+  edge: { pos: [number, number]; out: [number, number]; z: number }[],
+  mb: { gutter: MeshBuilder; kb: MeshBuilder; strip: MeshBuilder },
+  /** The strip's atlas column, when it has one. */
+  photo?: { col: number; cols: number },
+): void {
+  const dist = [0];
+  for (let i = 1; i < edge.length; i++) dist.push(dist[i - 1] + Math.hypot(edge[i].pos[0] - edge[i - 1].pos[0], edge[i].pos[1] - edge[i - 1].pos[1]));
+  const total = dist[dist.length - 1];
+  const row = (i: number) => {
+    const { pos, out, z: e } = edge[i];
+    const k = Math.max(0, Math.min(1, (total - dist[i]) / 4));
+    const top = e + KERB_H * k;
+    const p = (o: number): [number, number] => [pos[0] + out[0] * o, pos[1] + out[1] * o];
+    return [
+      { mb: mb.gutter, a: p(0), za: e, b: p(GUTTER * k), zb: e - GUTTER_DIP * k },
+      { mb: mb.kb, a: p(GUTTER * k), za: e - GUTTER_DIP * k, b: p((GUTTER + FACE_RUN) * k), zb: top },
+      { mb: mb.kb, a: p((GUTTER + FACE_RUN) * k), za: top, b: p(KERB_BACK * k), zb: top },
+      { mb: mb.strip, a: p(KERB_BACK * k), za: top, b: p(KERB_BACK + SIDE_STRIP), zb: top + 0.02 },
+    ];
+  };
+  for (let i = 0; i < edge.length - 1; i++) {
+    const ra = row(i), rb = row(i + 1);
+    ra.forEach((g, gi) => {
+      const h = rb[gi];
+      const q = g.mb.vertexCount;
+      // The strip maps into its atlas column (u across, v along the run); the rest tiles.
+      const atlasUV = photo && gi === 3;
+      const u0 = atlasUV ? photo.col / photo.cols : 0, u1 = atlasUV ? (photo.col + 1) / photo.cols : 1;
+      const va = atlasUV ? dist[i] / total : dist[i] / POUR, vb = atlasUV ? dist[i + 1] / total : dist[i + 1] / POUR;
+      g.mb.vertex([...g.a, g.za], u0, va);
+      g.mb.vertex([...g.b, g.zb], u1, va);
+      g.mb.vertex([...h.b, h.zb], u1, vb);
+      g.mb.vertex([...h.a, h.za], u0, vb);
+      // The kerb face looks back at the street; everything else faces up.
+      const o = edge[i].out;
+      facingQuad(g.mb, q, gi === 1 ? [-o[0], -o[1], 0.3] : [0, 0, 1]);
+    });
+  }
 }
 
 /** Quad from four vertices starting at i, wound so its normal leans toward `want`. */

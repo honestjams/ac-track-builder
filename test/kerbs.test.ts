@@ -100,4 +100,25 @@ describe("kerb and gutter", () => {
     // No return where the road has no kerb (the south side).
     expect(buildKerbReturns(plan, opts, [{ seg: mid, side: -1, width: 7, dir: [0, -1] }], k, "road").nodes).toHaveLength(0);
   });
+
+  it("carries the kerb on along a side street that has one", () => {
+    plan.samples.forEach((s) => (s.h = 10));
+    const mid = plan.samples.findIndex((s) => s.s >= 150);
+    const k: [number[], number[]] = [plan.samples.map(() => 1), plan.samples.map(() => 0)];
+    for (let i = mid - 4; i <= mid + 4; i++) k[0][i] = 0;
+    const x0 = plan.samples[mid].pos[0];
+    // The street's edges run north at x0 -+ 3.5 from where the returns end.
+    const edge = (_j: number, c: -1 | 1, R: number) => Array.from({ length: 12 }, (_, i) => ({
+      pos: [x0 + c * 3.5, 4 + R + i * 2] as [number, number], out: [c, 0] as [number, number], z: 10,
+    }));
+    const { nodes } = buildKerbReturns(plan, opts, [{ seg: mid, side: 1, width: 7, dir: [0, 1] }], k, "road", undefined, edge);
+    const names = nodes.map((n) => n.name);
+    expect(names).toContain("1STREET_GUTTER_SIDE");
+    expect(names).toContain("1GRASS_STRIP_SIDEG"); // grass: no photo given
+    const kerb = nodes.find((n) => n.name === "1KERB_RET")!;
+    const pts = Array.from({ length: kerb.positions.length / 3 }, (_, i) => [kerb.positions[i * 3], -kerb.positions[i * 3 + 2], kerb.positions[i * 3 + 1]]);
+    // Full height well up the street, sloping away only at the far end.
+    expect(pts.some(([x, y, z]) => Math.abs(Math.abs(x - x0) - 3.5 - 0.4) < 0.3 && y > 20 && y < 24 && z > 10 + KERB_H - 0.02)).toBe(true);
+    expect(Math.max(...pts.map(([, y]) => y))).toBeGreaterThan(30);
+  });
 });
