@@ -206,33 +206,81 @@ const WORLD = 40075016.68557849;
 
 /** One 256 x 256 web map tile of a state model's heights, or null where it has none. */
 const demFailures = new Map<DemSource, number>();
+/** exportImage sources are asked for blocks of up to this many tiles square in one request. */
+const BLOCK = 8;
 
-/** One tile from a state model; a model that keeps failing (an outage) is skipped for the session. */
-async function stateDemTile(src: DemSource, z: number, x: number, y: number): Promise<Float32Array | null> {
-  if ((demFailures.get(src) ?? 0) >= 4) return null;
-  const got = await fetchStateDemTile(src, z, x, y).catch(() => undefined);
-  // undefined = the request failed; null = answered, but no data there.
-  demFailures.set(src, got === undefined ? (demFailures.get(src) ?? 0) + 1 : 0);
-  return got ?? null;
+/**
+ * Heights from one state model for the tiles listed (null where it has
+ * none), keyed "x,y". exportImage models answer a block of up to 8 x 8
+ * tiles per request, which matters when a server is slow; a model that
+ * keeps failing (an outage) is skipped for the session.
+ */
+async function stateDemTiles(src: DemSource, z: number, list: { x: number; y: number }[]): Promise<Map<string, Float32Array | null>> {
+  const out = new Map<string, Float32Array | null>();
+  const jobs: (() => Promise<void>)[] = [];
+  const attempt = async <T>(fn: () => Promise<T>): Promise<T | undefined> => {
+    if ((demFailures.get(src) ?? 0) >= 4) return undefined;
+    try {
+      const got = await fn();
+      demFailures.set(src, 0);
+      return got;
+    } catch {
+      demFailures.set(src, (demFailures.get(src) ?? 0) + 1);
+      return undefined;
+    }
+  };
+  if (src === "vic") {
+    for (const { x, y } of list) {
+      jobs.push(async () => {
+        const h = await attempt(() => lercTile(`${STATE_DEMS.vic.url}/${z}/${y}/${x}`));
+        out.set(`${x},${y}`, h && h.some(usable) ? h : null);
+      });
+    }
+  } else {
+    const blocks = new Map<string, { x: number; y: number }[]>();
+    for (const t of list) {
+      const key = `${Math.floor(t.x / BLOCK)},${Math.floor(t.y / BLOCK)}`;
+      if (!blocks.has(key)) blocks.set(key, []);
+      blocks.get(key)!.push(t);
+    }
+    for (const tilesIn of blocks.values()) {
+      jobs.push(async () => {
+        const xs = tilesIn.map((t) => t.x), ys = tilesIn.map((t) => t.y);
+        const tx0 = Math.min(...xs), ty0 = Math.min(...ys), nx = Math.max(...xs) - tx0 + 1, ny = Math.max(...ys) - ty0 + 1;
+        const block = await attempt(() => exportBlock(src, z, tx0, ty0, nx, ny));
+        const W = nx * 256;
+        for (const { x, y } of tilesIn) {
+          if (!block) {
+            out.set(`${x},${y}`, null);
+            continue;
+          }
+          const h = new Float32Array(256 * 256);
+          const ox = (x - tx0) * 256, oy = (y - ty0) * 256;
+          for (let r = 0; r < 256; r++) h.set(block.subarray((oy + r) * W + ox, (oy + r) * W + ox + 256), r * 256);
+          out.set(`${x},${y}`, h.some(usable) ? h : null);
+        }
+      });
+    }
+  }
+  // A few requests at a time.
+  for (let k = 0; k < jobs.length; k += 4) await Promise.all(jobs.slice(k, k + 4).map((j) => j()));
+  return out;
 }
 
-async function fetchStateDemTile(src: DemSource, z: number, x: number, y: number): Promise<Float32Array | null> {
-  if (src === "vic") {
-    const heights = await lercTile(`${STATE_DEMS.vic.url}/${z}/${y}/${x}`);
-    return heights && heights.some(usable) ? heights : null;
-  }
+/** One exportImage request for a block of whole tiles: nx x ny tiles from (tx0, ty0), heights row by row from the north. */
+async function exportBlock(src: DemSource, z: number, tx0: number, ty0: number, nx: number, ny: number): Promise<Float32Array | null> {
   const size = WORLD / 2 ** z;
-  const x0 = x * size - WORLD / 2, y1 = WORLD / 2 - y * size;
-  const url = `${STATE_DEMS[src].url}?bbox=${x0},${y1 - size},${x0 + size},${y1}&bboxSR=3857&imageSR=3857&size=256,256`
+  const x0 = tx0 * size - WORLD / 2, y1 = WORLD / 2 - ty0 * size;
+  const w = nx * 256, h = ny * 256;
+  const url = `${STATE_DEMS[src].url}?bbox=${x0},${y1 - ny * size},${x0 + nx * size},${y1}&bboxSR=3857&imageSR=3857&size=${w},${h}`
     + "&format=bip&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image";
-  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(45000) });
   if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
   if (!res.ok) return null;
   const buf = await res.arrayBuffer();
   // Raw little-endian float32, rows from the north (the server pads the end).
-  if (buf.byteLength < 256 * 256 * 4) return null;
-  const heights = new Float32Array(buf.slice(0, 256 * 256 * 4));
-  return heights.some(usable) ? heights : null;
+  if (buf.byteLength < w * h * 4) return null;
+  return new Float32Array(buf.slice(0, w * h * 4));
 }
 
 const usable = (h: number) => Number.isFinite(h) && h > -100 && h < 9000;
@@ -266,28 +314,31 @@ export async function loadDem(
   let z = zoom >= 14 ? 16 : 13;
   while (z > floor && demTilesFor(proj, bounds, z).length > 200) z--;
   const list = demTilesFor(proj, bounds, z);
-  const tiles: { x: number; y: number; heights: Float32Array }[] = [];
+  const heights = new Map(list.map(({ x, y }) => [`${x},${y}`, new Float32Array(256 * 256).fill(NaN)]));
   const found = new Set<DemSource>();
-  for (let k = 0; k < list.length; k += 8) {
-    await Promise.all(list.slice(k, k + 8).map(async ({ x, y }) => {
-      const heights = new Float32Array(256 * 256).fill(NaN);
-      for (const src of states) {
-        if (heights.every(usable)) break;
-        const got = await stateDemTile(src, z, x, y);
-        if (!got) continue;
-        found.add(src);
-        for (let i = 0; i < heights.length; i++) if (!usable(heights[i]) && usable(got[i])) heights[i] = got[i];
-      }
-      // Whatever's left (outside the states, no data) from Terrarium.
-      for (let i = 0; i < heights.length; i++) {
-        if (usable(heights[i])) continue;
-        const p = proj.pixelToLocal([x * 256 + (i % 256) + 0.5, y * 256 + Math.floor(i / 256) + 0.5], z);
-        heights[i] = terrarium(p[0], p[1]);
-      }
-      tiles.push({ x, y, heights });
-    }));
+  for (const src of states) {
+    // Each model fills what the ones before it left.
+    const pending = list.filter(({ x, y }) => !heights.get(`${x},${y}`)!.every(usable));
+    if (!pending.length) break;
+    const got = await stateDemTiles(src, z, pending);
+    for (const [key, h] of got) {
+      if (!h) continue;
+      found.add(src);
+      const mine = heights.get(key)!;
+      for (let i = 0; i < mine.length; i++) if (!usable(mine[i]) && usable(h[i])) mine[i] = h[i];
+    }
   }
   if (!found.size) return terrarium;
+  // Whatever's left (outside the states, no data) from Terrarium.
+  const tiles = list.map(({ x, y }) => {
+    const h = heights.get(`${x},${y}`)!;
+    for (let i = 0; i < h.length; i++) {
+      if (usable(h[i])) continue;
+      const p = proj.pixelToLocal([x * 256 + (i % 256) + 0.5, y * 256 + Math.floor(i / 256) + 0.5], z);
+      h[i] = terrarium(p[0], p[1]);
+    }
+    return { x, y, heights: h };
+  });
   for (const src of found) used?.add(src);
   return DemGrid.fromHeights(proj, z, tiles).sample;
 }

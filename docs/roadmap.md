@@ -15,7 +15,7 @@ Rough priority order. Each chunk is a self-contained change.
    (KEEP CLEAR, BUS), bicycle symbols, kerb returns round the
    corners of side streets, footpaths as their own surface.
 4. **Higher-resolution elevation.** Done for Queensland (the state's
-   bare-earth lidar model) and NSW (5 m). Next: Victoria, USGS 3DEP 1 m,
+   bare-earth lidar model), NSW (5 m) and Victoria (10 m). Next: USGS 3DEP 1 m,
    Japan GSI 5 m.
 5. **Build in a Web Worker** so the page stays responsive on long roads.
 6. **CSP extras.** `ext_config.ini` with grass FX, rain puddles and track

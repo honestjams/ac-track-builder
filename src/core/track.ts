@@ -84,6 +84,8 @@ export interface TrackResult {
   model: Kn5Model;
   plan: RoadPlan;
   proj: LocalProjection;
+  /** Where side streets meet the route (distance along it, side 1 = left). */
+  junctions: { s: number; side: 1 | -1 }[];
   /** Raw pixels for textures the browser can't decode (DDS), keyed by texture name. */
   previewTextures: Record<string, { rgba: Uint8Array; width: number; height: number }>;
   stats: {
@@ -503,9 +505,17 @@ export async function buildTrack(
     materials.push(material(name, `${name}.dds`, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
     return { material: name, photo: true };
   };
-  const kerbMeshes = buildKerbs(plan, opts, kerbs, stripMaterial);
-  // And round the corners into side streets.
-  const kerbReturns = opts.kerbs ? buildKerbReturns(plan, opts, streetPlan.junctions, kerbs, roadMaterial(0, 6, { ...plan.samples[0], kerb: [1, 1] })) : [];
+  // Round the corners into side streets, then along the road.
+  const returns = opts.kerbs
+    ? buildKerbReturns(plan, opts, streetPlan.junctions, kerbs, roadMaterial(0, 6, { ...plan.samples[0], kerb: [1, 1] }), raster && opts.imageryZoom > 0 ? displayOf(raster) : undefined)
+    : null;
+  const kerbReturns = returns?.nodes ?? [];
+  if (returns?.atlas) {
+    textures.push({ name: "returns_photo.dds", data: encodeDdsDxt1(returns.atlas.rgba, returns.atlas.width, returns.atlas.height) });
+    previewTextures["returns_photo.dds"] = returns.atlas;
+    materials.push(material("returns_photo", "returns_photo.dds", { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
+  }
+  const kerbMeshes = buildKerbs(plan, opts, kerbs, stripMaterial, returns?.noRamp);
   // Photo surface on the traced side streets too (the nearest 40, to keep the file in check).
   const photoStreets = new Set(
     opts.roadSurface === "photo" && raster
@@ -709,6 +719,7 @@ export async function buildTrack(
   await progress("Done", 1);
   return {
     slug, files, model, plan, proj, previewTextures,
+    junctions: streetPlan.junctions.map((j) => ({ s: j.s, side: j.side })),
     stats: {
       length: plan.length,
       timedLength: timedLength(),

@@ -29,7 +29,9 @@ everything runs client-side: no server, no account, no queue.
 - Kerb and gutter in town: a concrete gutter, a 150 mm kerb (its own
   physics surface, mountable but felt) and a nature strip textured from the
   aerial photo, so footpaths and driveways show. Out of town only where the
-  photo clearly shows one. Roundabouts in town get a kerbed ring too.
+  photo clearly shows one. Kerbs curve round the corners into side
+  streets, and roundabouts in town get a kerbed ring too, open wherever a
+  road joins it. A kerb never stands on drivable road.
 - Low-detail horizon terrain out to 1.5 km so the world doesn't end at the
   roadside.
 - Australian road surfaces: chip seal on rural roads, dense asphalt on major
@@ -53,8 +55,9 @@ everything runs client-side: no server, no account, no queue.
   available (up to 0.1 m/px), falling back to Esri elsewhere. NSW imagery
   is colour-matched to Esri's at the zoom in use, as some of its surveys
   carry a strong blue haze.
-- Bare-earth elevation from the Queensland and NSW government models
-  (lidar where captured) instead of SRTM, which measures the tree tops.
+- Bare-earth elevation from the Queensland, NSW and Victorian government
+  models (lidar where captured) instead of SRTM, which measures the tree
+  tops.
 - Scenery: trees wherever the aerial imagery shows tree canopy, guard rails
   where the ground drops away beside the road (or where OSM maps one), white
   guide posts, and buildings: OSM footprints where mapped, plus placeholder
@@ -149,12 +152,13 @@ Node in the tests with synthetic terrain.
   [Photon](https://photon.komoot.io) and Nominatim.
 - Elevation: [Terrain Tiles on AWS Open Data](https://registry.opendata.aws/terrain-tiles/)
   (SRTM, USGS 3DEP, GMTED and national lidar where available).
-- Elevation in Queensland and NSW: the State of Queensland's bare-earth
+- Elevation in Queensland, NSW and Victoria: the State of Queensland's bare-earth
   [Queensland Digital Elevation Model](https://spatial-img.information.qld.gov.au/arcgis/rest/services/Elevation/QldDem/ImageServer)
   (0.5 m lidar where captured) and NSW Spatial Services'
   [5 m elevation](https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_5M_Elevation/ImageServer),
   used instead of the tiles there because SRTM-based tiles include the tree
-  canopy.
+  canopy. In Victoria, the [Vicmap Elevation 10 m DEM](https://tiles-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_10m_DEM/ImageServer)
+  (c) State of Victoria, decoded with Esri's [lerc](https://github.com/Esri/lerc).
 - Aerial imagery: Queensland Government and NSW Spatial Services imagery
   where available, else Esri World Imagery.
 - Street-level detections: [Mapillary](https://www.mapillary.com), CC BY-SA,

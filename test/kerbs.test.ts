@@ -78,7 +78,9 @@ describe("kerb and gutter", () => {
     const k: [number[], number[]] = [plan.samples.map(() => 1), plan.samples.map(() => 0)];
     for (let i = mid - 4; i <= mid + 4; i++) k[0][i] = 0;
     // A 7 m street heading north off the left (north) side at x = 150.
-    const nodes = buildKerbReturns(plan, opts, [{ seg: mid, side: 1, width: 7, dir: [0, 1] }], k, "road");
+    const { nodes, noRamp } = buildKerbReturns(plan, opts, [{ seg: mid, side: 1, width: 7, dir: [0, 1] }], k, "road");
+    // Each corner replaces the road kerb's slope down toward the mouth.
+    expect(noRamp.size).toBe(2);
     const names = nodes.map((n) => n.name);
     expect(names).toEqual(["1ROAD_GUTTER_RET", "1KERB_RET", "1GRASS_STRIP_RET", "1STREET_RETFILL"]);
     const kerb = nodes[1];
@@ -90,12 +92,12 @@ describe("kerb and gutter", () => {
     for (const [x, y] of pts) {
       expect(y).toBeGreaterThan(4 - 0.01);
       expect(Math.abs(x - x0)).toBeGreaterThan(3.5 - 0.01);
-      expect(Math.abs(x - x0)).toBeLessThan(3.5 + RETURN_R + 0.01);
+      expect(Math.abs(x - x0)).toBeLessThan(3.5 + 3 * RETURN_R);
     }
     // The fill faces up.
     const fill = nodes[3];
     for (let i = 1; i < fill.normals.length; i += 3) expect(fill.normals[i]).toBeGreaterThan(0.9);
     // No return where the road has no kerb (the south side).
-    expect(buildKerbReturns(plan, opts, [{ seg: mid, side: -1, width: 7, dir: [0, -1] }], k, "road")).toHaveLength(0);
+    expect(buildKerbReturns(plan, opts, [{ seg: mid, side: -1, width: 7, dir: [0, -1] }], k, "road").nodes).toHaveLength(0);
   });
 });

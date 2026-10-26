@@ -200,7 +200,14 @@ function profile(s: RoadSample, side: 1 | -1, k: number, opts: BuildOptions, pho
   return segs.reverse().map((g) => ({ ...g, a: [-g.b[0], g.b[1]], b: [-g.a[0], g.a[1]], ua: g.ub, ub: g.ua }));
 }
 
-export function buildKerbs(plan: RoadPlan, opts: BuildOptions, kerb: [number[], number[]], stripMaterial: StripMaterialFn): KerbMeshes {
+export function buildKerbs(
+  plan: RoadPlan,
+  opts: BuildOptions,
+  kerb: [number[], number[]],
+  stripMaterial: StripMaterialFn,
+  /** Sections (`${i}:${side}`, from sample i to i + 1) whose start or end slope a kerb return replaces. */
+  noRamp: Set<string> = new Set(),
+): KerbMeshes {
   const samples = plan.samples;
   const n = samples.length;
   const at = (i: number) => samples[i % n];
@@ -237,6 +244,7 @@ export function buildKerbs(plan: RoadPlan, opts: BuildOptions, kerb: [number[], 
         for (let r = 0; r < rows.length - 1; r++) {
           const i = a + r;
           if (!(kerb[k][i % n] > 0 || kerb[k][(i + 1) % n] > 0)) continue;
+          if (noRamp.has(`${i % n}:${side}`)) continue;
           const p = base + r * 2, q = p + 2;
           mb.quad(p, p + 1, q + 1, q);
         }
@@ -302,11 +310,17 @@ export function buildKerbReturns(
   junctions: { seg: number; side: 1 | -1; width: number; dir: [number, number] }[],
   kerb: [number[], number[]],
   fillMaterial: string,
-): Kn5MeshNode[] {
+  /** The aerial photo: the strips inside the returns are textured from it (one atlas cell per corner). */
+  photo?: RasterSampler,
+): { nodes: Kn5MeshNode[]; noRamp: Set<string>; atlas?: { rgba: Uint8Array; width: number; height: number } } {
+  const noRamp = new Set<string>();
+  const CELL = 64, PER_ROW = 16, ATLAS = CELL * PER_ROW;
+  const atlas = photo ? new Uint8Array(ATLAS * ATLAS * 4) : undefined;
+  let cells = 0;
   const n = plan.samples.length;
   const spacing = n > 1 ? plan.samples[1].s - plan.samples[0].s : 2;
   const gutter = new MeshBuilder(), kb = new MeshBuilder(), strip = new MeshBuilder(), fill = new MeshBuilder();
-  const R = RETURN_R, STEPS = 8;
+  const STEPS = 8;
   for (const j of junctions) {
     const s = plan.samples[j.seg];
     const side = j.side, k = side === 1 ? 0 : 1;
@@ -316,9 +330,14 @@ export function buildKerbReturns(
     const half = s.width / 2, e = surfaceHeight(s, half * side, opts.crown);
     const O: [number, number] = [s.pos[0] + v[0] * half, s.pos[1] + v[1] * half];
     for (const c of [-1, 1] as const) {
-      // Only where the road's own kerb carries on past this corner.
-      const beyond = j.seg + c * Math.round((j.width / 2 + R + 2) / spacing);
-      if (beyond < 0 || beyond >= n || !(kerb[k][beyond] > 0)) continue;
+      // The return starts where the road's own kerb reaches full height on this side of the mouth.
+      let first = j.seg + c * Math.ceil(j.width / 2 / spacing);
+      while (first >= 0 && first < n && !(kerb[k][first] > 0) && Math.abs(first - j.seg) * spacing < j.width / 2 + 3 * RETURN_R) first += c;
+      if (first < 0 || first >= n || !(kerb[k][first] > 0)) continue;
+      const R = Math.abs(plan.samples[first].s - s.s) - j.width / 2;
+      if (R < 2 || R > 3 * RETURN_R) continue;
+      // The road kerb's slope down toward the mouth is replaced by the return.
+      noRamp.add(`${c > 0 ? first - 1 : first}:${side}`);
       const C: [number, number] = [O[0] + u[0] * c * (j.width / 2 + R) + v[0] * R, O[1] + u[1] * c * (j.width / 2 + R) + v[1] * R];
       const A: [number, number] = [O[0] + u[0] * c * j.width / 2, O[1] + u[1] * c * j.width / 2];
       // Point on the circle at angle th (0 on the road's edge, 90 degrees on the side street's) and radius r.
@@ -326,6 +345,26 @@ export function buildKerbReturns(
         const dx = -v[0] * Math.cos(th) - u[0] * c * Math.sin(th), dy = -v[1] * Math.cos(th) - u[1] * c * Math.sin(th);
         return [C[0] + dx * r, C[1] + dy * r];
       };
+      // This corner's square of photo (centre +-R) in its atlas cell; strip UVs map into it.
+      const cell = atlas && cells < PER_ROW * PER_ROW ? cells++ : -1;
+      const cx = cell % PER_ROW, cy = Math.floor(cell / PER_ROW);
+      if (atlas && cell >= 0) {
+        for (let py = 0; py < CELL; py++) {
+          for (let px = 0; px < CELL; px++) {
+            const wx = C[0] - R + ((px + 0.5) / CELL) * 2 * R, wy = C[1] + R - ((py + 0.5) / CELL) * 2 * R;
+            const col = photo!(wx, wy) ?? [0.33, 0.4, 0.24];
+            const o = ((cy * CELL + py) * ATLAS + cx * CELL + px) * 4;
+            atlas[o] = col[0] * 255;
+            atlas[o + 1] = col[1] * 255;
+            atlas[o + 2] = col[2] * 255;
+            atlas[o + 3] = 255;
+          }
+        }
+      }
+      const uvOf = (p: [number, number]): [number, number] => cell < 0 ? [0, 0] : [
+        (cx + (p[0] - (C[0] - R)) / (2 * R)) / PER_ROW,
+        (cy + ((C[1] + R) - p[1]) / (2 * R)) / PER_ROW,
+      ];
       // The kerb slopes away over the last quarter of the curve, where the side street (which has none) begins.
       const kAt = (q: number) => Math.min(1, (1 - q) / 0.25);
       const profile = (q: number) => {
@@ -346,10 +385,15 @@ export function buildKerbReturns(
           const h = pb[gi];
           const i = g.mb.vertexCount;
           const vv = (th: number) => (th * R) / POUR;
-          g.mb.vertex([...at(ta, g.r0), g.z0], 0, vv(ta));
-          g.mb.vertex([...at(ta, g.r1), g.z1], 1, vv(ta));
-          g.mb.vertex([...at(tb, h.r1), h.z1], 1, vv(tb));
-          g.mb.vertex([...at(tb, h.r0), h.z0], 0, vv(tb));
+          const put = (th: number, r: number, z: number, u: number) => {
+            const p = at(th, r);
+            const [pu, pv] = g.mb === strip && cell >= 0 ? uvOf(p) : [u, vv(th)];
+            g.mb.vertex([...p, z], pu, pv);
+          };
+          put(ta, g.r0, g.z0, 0);
+          put(ta, g.r1, g.z1, 1);
+          put(tb, h.r1, h.z1, 1);
+          put(tb, h.r0, h.z0, 0);
           // The kerb face looks out of the curve, at the road; everything else faces up.
           const mid = at((ta + tb) / 2, R);
           facingQuad(g.mb, i, gi === 1 ? [mid[0] - C[0], mid[1] - C[1], 0.3] : [0, 0, 1]);
@@ -363,12 +407,12 @@ export function buildKerbReturns(
       }
     }
   }
-  const out: Kn5MeshNode[] = [];
-  if (gutter.indices.length) out.push(gutter.toKn5("1ROAD_GUTTER_RET", "concrete"));
-  if (kb.indices.length) out.push(kb.toKn5("1KERB_RET", "concrete"));
-  if (strip.indices.length) out.push(strip.toKn5("1GRASS_STRIP_RET", "grass"));
-  if (fill.indices.length) out.push(fill.toKn5("1STREET_RETFILL", fillMaterial));
-  return out;
+  const nodes: Kn5MeshNode[] = [];
+  if (gutter.indices.length) nodes.push(gutter.toKn5("1ROAD_GUTTER_RET", "concrete"));
+  if (kb.indices.length) nodes.push(kb.toKn5("1KERB_RET", "concrete"));
+  if (strip.indices.length) nodes.push(strip.toKn5("1GRASS_STRIP_RET", atlas && cells ? "returns_photo" : "grass"));
+  if (fill.indices.length) nodes.push(fill.toKn5("1STREET_RETFILL", fillMaterial));
+  return { nodes, noRamp, atlas: atlas && cells ? { rgba: atlas, width: ATLAS, height: ATLAS } : undefined };
 }
 
 /** Quad from four vertices starting at i, wound so its normal leans toward `want`. */
