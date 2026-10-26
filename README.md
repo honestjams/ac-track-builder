@@ -64,8 +64,15 @@ everything runs client-side: no server, no account, no queue.
   at the setback and depth the photo shows.
 - Invisible walls that keep you on the road and pull in where switchbacks
   pass close to each other.
-- Pit boxes, a starting grid, hotlap start, A-to-B start/finish timing (or a
-  start/finish line for loops), and an AI line (`fast_lane.ai`).
+- Time trial ready: on an A-to-B road the timed section is exactly the road
+  between your pins. A run-up is added before the start pin (the grid,
+  plus room for a flying start in Hotlap mode) and a 150 m run-off after
+  the finish pin, along the real streets where they carry on. The start
+  line is painted across the road and the finish line is chequered. Side
+  streets and grass are off track, so cutting through them invalidates the
+  run. "Back to pits" or "Restart" puts you on the grid 8 m behind the
+  line. Loops get a start/finish line instead.
+- Pit boxes, a starting grid, a hotlap start and an AI line (`fast_lane.ai`).
 - Content Manager extras: `ui_track.json` with name, length, geotags and
   country, an outline, a preview render, and the in-game map.
 

@@ -34,6 +34,13 @@ export interface BuildOptions {
   crown: number;
   /** Number of pit boxes / grid slots. */
   pitCount: number;
+  /**
+   * Point to point roads: metres of run-up added before the grid (for a
+   * flying hotlap) and of run-off after the finish line, along the real
+   * streets. The timed section is exactly the road between the pins.
+   */
+  runUp: number;
+  runOff: number;
   /** Aerial imagery zoom level for terrain textures (0 = no imagery). */
   imageryZoom: number;
   /** Texture size per terrain chunk, pixels. */
@@ -94,6 +101,8 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   maxBank: 0.06,
   crown: 0.02,
   pitCount: 8,
+  runUp: 60,
+  runOff: 150,
   imageryZoom: 18,
   textureSize: 1024,
   demZoom: 14,

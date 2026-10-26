@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planRoad } from "../src/core/road";
 import { withDefaults } from "../src/core/options";
-import { buildKerbs, kerbEvidence, KERB_H, planKerbs } from "../src/core/kerbs";
+import { buildKerbReturns, buildKerbs, kerbEvidence, KERB_H, planKerbs, RETURN_R } from "../src/core/kerbs";
 import type { RasterSampler } from "../src/core/trace";
 import type { Vec2 } from "../src/core/geo";
 
@@ -70,5 +70,32 @@ describe("kerb and gutter", () => {
     // Kerb face normals point back at the road (south, AC +z) or up.
     const nz = Array.from({ length: m.kerb[0].normals.length / 3 }, (_, i) => [m.kerb[0].normals[i * 3 + 1], -m.kerb[0].normals[i * 3 + 2]]);
     expect(nz.every(([up, north]) => up > 0.1 || north < -0.5)).toBe(true);
+  });
+
+  it("curves the kerb round the corners into a side street, with asphalt filling the corner", () => {
+    plan.samples.forEach((s) => (s.h = 10));
+    const mid = plan.samples.findIndex((s) => s.s >= 150);
+    const k: [number[], number[]] = [plan.samples.map(() => 1), plan.samples.map(() => 0)];
+    for (let i = mid - 4; i <= mid + 4; i++) k[0][i] = 0;
+    // A 7 m street heading north off the left (north) side at x = 150.
+    const nodes = buildKerbReturns(plan, opts, [{ seg: mid, side: 1, width: 7, dir: [0, 1] }], k, "road");
+    const names = nodes.map((n) => n.name);
+    expect(names).toEqual(["1ROAD_GUTTER_RET", "1KERB_RET", "1GRASS_STRIP_RET", "1STREET_RETFILL"]);
+    const kerb = nodes[1];
+    const pts = Array.from({ length: kerb.positions.length / 3 }, (_, i) => [kerb.positions[i * 3], -kerb.positions[i * 3 + 2]]);
+    // Both corners: west of the street and east of it, all north of the road edge and outside the street.
+    const x0 = plan.samples[mid].pos[0];
+    expect(pts.some(([x]) => x < x0 - 3.5)).toBe(true);
+    expect(pts.some(([x]) => x > x0 + 3.5)).toBe(true);
+    for (const [x, y] of pts) {
+      expect(y).toBeGreaterThan(4 - 0.01);
+      expect(Math.abs(x - x0)).toBeGreaterThan(3.5 - 0.01);
+      expect(Math.abs(x - x0)).toBeLessThan(3.5 + RETURN_R + 0.01);
+    }
+    // The fill faces up.
+    const fill = nodes[3];
+    for (let i = 1; i < fill.normals.length; i += 3) expect(fill.normals[i]).toBeGreaterThan(0.9);
+    // No return where the road has no kerb (the south side).
+    expect(buildKerbReturns(plan, opts, [{ seg: mid, side: -1, width: 7, dir: [0, -1] }], k, "road")).toHaveLength(0);
   });
 });

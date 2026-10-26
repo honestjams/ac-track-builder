@@ -95,22 +95,47 @@ async function limited<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Hosts that keep failing (outage, CORS errors) are given up on for the session, so builds fall back fast. */
+const failures = new Map<string, number>();
+const GIVE_UP = 6;
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+
 export async function loadBitmap(url: string, attempts = 3): Promise<ImageBitmap | null> {
+  const host = hostOf(url);
+  if ((failures.get(host) ?? 0) >= GIVE_UP) return null;
   return limited(async () => {
     for (let a = 0; a < attempts; a++) {
+      if ((failures.get(host) ?? 0) >= GIVE_UP) return null;
       try {
-        const r = await fetch(url, { mode: "cors" });
-        if (r.status === 404) return null;
+        const r = await fetch(url, { mode: "cors", signal: AbortSignal.timeout(20000) });
+        if (r.status === 404) {
+          failures.set(host, 0);
+          return null;
+        }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         // No colour management: elevation is encoded in the raw RGB values.
-        return await createImageBitmap(await r.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+        const bmp = await createImageBitmap(await r.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+        failures.set(host, 0);
+        return bmp;
       } catch (e) {
+        failures.set(host, (failures.get(host) ?? 0) + 1);
         if (a === attempts - 1) throw new Error(`Could not load ${url}: ${(e as Error).message}`);
         await new Promise((res) => setTimeout(res, 500 * 2 ** a));
       }
     }
     return null;
   });
+}
+
+/** True when a host has been given up on this session. */
+export function hostDown(url: string): boolean {
+  return (failures.get(hostOf(url)) ?? 0) >= GIVE_UP;
 }
 
 function pixels(bitmap: ImageBitmap): Uint8ClampedArray {
@@ -138,29 +163,76 @@ const STATE_DEMS = {
     label: "NSW",
     box: [140.9, -37.6, 153.7, -28.1],
   },
+  vic: {
+    // A tile cache of LERC-compressed heights rather than exportImage.
+    url: "https://tiles-ap1.arcgis.com/P744lA0wf4LlBZ84/arcgis/rest/services/Vicmap_10m_DEM/ImageServer/tile",
+    credit: "Elevation: Vicmap Elevation 10 m DEM (c) State of Victoria (Department of Transport and Planning)",
+    label: "Vic",
+    box: [140.9, -39.3, 150.1, -33.9],
+  },
 } as const;
+type LercModule = typeof import("lerc");
+let lerc: Promise<LercModule> | null = null;
+
+/** The LERC decoder (WebAssembly), loaded the first time a LERC tile is needed. */
+function loadLerc(): Promise<LercModule> {
+  lerc ??= Promise.all([import("lerc"), import("lerc/lerc-wasm.wasm?url")]).then(async ([mod, wasm]) => {
+    await mod.load({ locateFile: () => wasm.default });
+    return mod;
+  });
+  return lerc;
+}
+
+/** A 257 x 257 LERC tile of corner samples as 256 x 256 pixel-centre heights. */
+async function lercTile(url: string): Promise<Float32Array | null> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) return null;
+  const Lerc = await loadLerc();
+  const block = Lerc.decode(await res.arrayBuffer());
+  const src = block.pixels[0] as ArrayLike<number>, mask = block.mask, w = block.width;
+  if (w < 257 || block.height < 257) return null;
+  const out = new Float32Array(256 * 256);
+  const at = (r: number, c: number) => (mask && !mask[r * w + c] ? NaN : src[r * w + c]);
+  for (let r = 0; r < 256; r++) {
+    for (let c = 0; c < 256; c++) out[r * 256 + c] = (at(r, c) + at(r, c + 1) + at(r + 1, c) + at(r + 1, c + 1)) / 4;
+  }
+  return out;
+}
 export type DemSource = keyof typeof STATE_DEMS;
 export const DEM_CREDIT = Object.fromEntries(Object.entries(STATE_DEMS).map(([k, v]) => [k, v.credit])) as Record<DemSource, string>;
 export const DEM_LABEL = Object.fromEntries(Object.entries(STATE_DEMS).map(([k, v]) => [k, v.label])) as Record<DemSource, string>;
 const WORLD = 40075016.68557849;
 
 /** One 256 x 256 web map tile of a state model's heights, or null where it has none. */
+const demFailures = new Map<DemSource, number>();
+
+/** One tile from a state model; a model that keeps failing (an outage) is skipped for the session. */
 async function stateDemTile(src: DemSource, z: number, x: number, y: number): Promise<Float32Array | null> {
+  if ((demFailures.get(src) ?? 0) >= 4) return null;
+  const got = await fetchStateDemTile(src, z, x, y).catch(() => undefined);
+  // undefined = the request failed; null = answered, but no data there.
+  demFailures.set(src, got === undefined ? (demFailures.get(src) ?? 0) + 1 : 0);
+  return got ?? null;
+}
+
+async function fetchStateDemTile(src: DemSource, z: number, x: number, y: number): Promise<Float32Array | null> {
+  if (src === "vic") {
+    const heights = await lercTile(`${STATE_DEMS.vic.url}/${z}/${y}/${x}`);
+    return heights && heights.some(usable) ? heights : null;
+  }
   const size = WORLD / 2 ** z;
   const x0 = x * size - WORLD / 2, y1 = WORLD / 2 - y * size;
   const url = `${STATE_DEMS[src].url}?bbox=${x0},${y1 - size},${x0 + size},${y1}&bboxSR=3857&imageSR=3857&size=256,256`
     + "&format=bip&pixelType=F32&interpolation=RSP_BilinearInterpolation&f=image";
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    // Raw little-endian float32, rows from the north (the server pads the end).
-    if (buf.byteLength < 256 * 256 * 4) return null;
-    const heights = new Float32Array(buf.slice(0, 256 * 256 * 4));
-    return heights.some(usable) ? heights : null;
-  } catch {
-    return null;
-  }
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer();
+  // Raw little-endian float32, rows from the north (the server pads the end).
+  if (buf.byteLength < 256 * 256 * 4) return null;
+  const heights = new Float32Array(buf.slice(0, 256 * 256 * 4));
+  return heights.some(usable) ? heights : null;
 }
 
 const usable = (h: number) => Number.isFinite(h) && h > -100 && h < 9000;

@@ -98,6 +98,20 @@ describe("buildTrack through a roundabout", async () => {
     }
   });
 
+  it("keeps the ring's kerb out of the whole width of a wide, angled entry", () => {
+    const a = rb.crossings[0];
+    // An entry spanning 50 degrees of the ring, much wider than the ring itself.
+    const span = (50 * Math.PI) / 180;
+    const m = buildRingMeshes({ ...rb, kerbed: true, openings: [[a - span / 2, a + span / 2]] }, 0, withDefaults({}), "road");
+    const kerb = m.kerb.find((n) => n.name.startsWith("1KERB_"))!;
+    for (let i = 0; i < kerb.positions.length; i += 3) {
+      const ang = Math.atan2(-kerb.positions[i + 2] - rb.c[1], kerb.positions[i] - rb.c[0]);
+      let d = Math.abs(ang - a) % (2 * Math.PI);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      if (d < span / 2 - 0.01) expect(kerb.positions[i + 1] - ringHeight(rb, rb.r + rb.w / 2)).toBeLessThan(0.02);
+    }
+  });
+
   it("stops the straight road ribbon at the ring", () => {
     const ribbon = all.filter((m) => /^1ROAD_\d/.test(m.name));
     for (const m of ribbon) {

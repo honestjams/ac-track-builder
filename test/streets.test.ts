@@ -55,7 +55,7 @@ describe("side streets, signs and furniture", async () => {
 
   it("draws the T junction and both arms of the crossroads, not the overpasses", () => {
     expect(result.stats.sideStreets).toBe(3);
-    const side = all.filter((m) => m.name.startsWith("1ROAD_SIDE_"));
+    const side = all.filter((m) => m.name.startsWith("1STREET_"));
     expect(side.length).toBeGreaterThan(0);
     // nothing drawn along x = 250 (motorway) or x = -100 (bridge); AC x = east
     for (const m of side) {
@@ -67,7 +67,7 @@ describe("side streets, signs and furniture", async () => {
   });
 
   it("runs side streets right up to the route's edge", () => {
-    const side = all.filter((m) => m.name.startsWith("1ROAD_SIDE_"));
+    const side = all.filter((m) => m.name.startsWith("1STREET_"));
     let reaches = false;
     for (const m of side) {
       for (let i = 0; i < m.positions.length; i += 3) {

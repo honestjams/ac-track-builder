@@ -38,6 +38,28 @@ export interface Roundabout extends Circle {
   crossings: number[];
   /** Kerb and gutter round the outside instead of a gravel verge (in town). */
   kerbed?: boolean;
+  /**
+   * Where roads join the ring, as angle ranges (radians from +x, counter-
+   * clockwise from the first to the second), taken from the connectors'
+   * actual edges. The verge and kerb stay out of these.
+   */
+  openings?: [number, number][];
+}
+
+/** Metres round a ring of radius r from angle a to the nearest opening (0 inside one). */
+export function toOpening(rb: Roundabout, r: number, a: number): number {
+  const wrap = (x: number) => ((x % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  const open = rb.openings?.length
+    ? rb.openings
+    // No connector edges known: the ring's own width either side of each crossing.
+    : rb.crossings.map((x): [number, number] => [x - (rb.w / 2 + 2) / r, x + (rb.w / 2 + 2) / r]);
+  let best = Infinity;
+  for (const [a0, a1] of open) {
+    const span = wrap(a1 - a0), off = wrap(a - a0);
+    if (off <= span) return 0;
+    best = Math.min(best, (off - span) * r, (2 * Math.PI - off) * r);
+  }
+  return best;
 }
 
 export const RING_FALL = 0.02;
@@ -204,13 +226,9 @@ export function buildRingMeshes(rb: Roundabout, k: number, opts: BuildOptions, r
 
   // Outer verge, except where roads join the ring.
   const verge = new MeshBuilder();
-  const gapM = rb.w / 2 + 2;
+  const gapM = 0.5;
   /** Metres round the outer edge from angle a to the nearest road joining the ring. */
-  const toGap = (a: number) => Math.min(...rb.crossings.map((x) => {
-    let d = Math.abs(a - x) % (2 * Math.PI);
-    if (d > Math.PI) d = 2 * Math.PI - d;
-    return d * Ro;
-  }));
+  const toGap = (a: number) => toOpening(rb, Ro, a);
   const vo = Ro + opts.vergeWidth;
   const zi = ringHeight(rb, Ro);
   const kerb: Kn5MeshNode[] = [];

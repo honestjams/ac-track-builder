@@ -63,7 +63,7 @@ describe("buildTrack (synthetic terrain)", async () => {
     const names = nodes.map((n) => n.name);
     for (const m of meshes) {
       // physical surfaces, or non-collidable horizon and scenery
-      expect(m.name).toMatch(/^(1(ROAD|GRASS|WALL|KERB)_|BACKDROP_|TREES_|GUIDEPOSTS_|RAILPOSTS_|ROOF_|MARKINGS_|RRPM_)/);
+      expect(m.name).toMatch(/^(1(ROAD|STREET|GRASS|WALL|KERB)_|BACKDROP_|TREES_|GUIDEPOSTS_|RAILPOSTS_|ROOF_|MARKINGS_|RRPM_)/);
       if (m.kind !== "mesh") continue;
       expect(m.positions.every(Number.isFinite)).toBe(true);
       expect(m.normals.every(Number.isFinite)).toBe(true);
@@ -75,6 +75,38 @@ describe("buildTrack (synthetic terrain)", async () => {
     }
     expect(names.filter((n) => n.startsWith("AC_PIT_"))).toHaveLength(8);
     expect(meshes.some((m) => m.name.startsWith("BACKDROP_"))).toBe(true);
+  });
+
+  it("times exactly the road between the pins, with a grid behind the start and room to stop after the finish", () => {
+    const kn5 = readKn5(result.files["test_hairpin/test_hairpin.kn5"]);
+    const nodes = allNodes(kn5.root);
+    const at = (name: string) => {
+      const n = nodes.find((m) => m.name === name)!;
+      return n.kind === "node" ? n.transform : [];
+    };
+    const plan = result.plan;
+    const pin = (i: number) => plan.samples[i].pos;
+    const ac = (t: number[]): [number, number] => [t[12], -t[14]]; // AC x, -z = local east, north
+    const mid = (a: number[], b: number[]) => [(ac(a)[0] + ac(b)[0]) / 2, (ac(a)[1] + ac(b)[1]) / 2];
+    const near = (p: number[], q: number[], d: number) => expect(Math.hypot(p[0] - q[0], p[1] - q[1])).toBeLessThan(d);
+    expect(plan.timed).toBeDefined();
+    // The start and finish gates sit on the route's first and last points (the pins).
+    near(mid(at("AC_AB_START_L"), at("AC_AB_START_R")), pin(plan.timed!.start), 1);
+    near(mid(at("AC_AB_FINISH_L"), at("AC_AB_FINISH_R")), pin(plan.timed!.finish), 1);
+    const startS = plan.samples[plan.timed!.start].s, finishS = plan.samples[plan.timed!.finish].s;
+    expect(startS).toBeGreaterThan(14 + 4 * 8);
+    expect(plan.length - finishS).toBeGreaterThan(140);
+    expect(result.stats.timedLength).toBeCloseTo(finishS - startS, 0);
+    // Every spawn is behind the start line and faces up the road: the game takes -Z as forward.
+    for (const name of ["AC_START_0", "AC_START_7", "AC_PIT_0", "AC_HOTLAP_START_0"]) {
+      const t = at(name);
+      const [x, y] = ac(t);
+      const n = plan.samples.reduce((a, s, i) => (Math.hypot(s.pos[0] - x, s.pos[1] - y) < Math.hypot(plan.samples[a].pos[0] - x, plan.samples[a].pos[1] - y) ? i : a), 0);
+      expect(plan.samples[n].s).toBeLessThan(startS);
+      const tan = plan.samples[n].tan;
+      const facing = [-t[8], t[10]]; // -Z in local east, north
+      expect(facing[0] * tan[0] + facing[1] * tan[1]).toBeGreaterThan(0.95);
+    }
   });
 
   it("keeps the terrain below the asphalt", () => {

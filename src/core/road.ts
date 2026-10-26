@@ -25,6 +25,8 @@ export interface RoadPlan {
   samples: RoadSample[];
   length: number;
   roundabouts: Roundabout[];
+  /** Point to point: sample indices of the start and finish lines (the pins), when a run-up and run-off were added. */
+  timed?: { start: number; finish: number };
 }
 
 /** Width lookup for a point, usually from OSM tags; undefined = no data. */

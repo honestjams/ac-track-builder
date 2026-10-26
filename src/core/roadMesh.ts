@@ -31,6 +31,8 @@ export function chunkRanges(plan: RoadPlan): [number, number][] {
 export interface RoadMeshes {
   road: Kn5MeshNode[];
   verge: Kn5MeshNode[];
+  /** Per roundabout, the angle ranges its connectors cover (see Roundabout.openings). */
+  openings: [number, number][][];
 }
 
 /** Picks the road material for chunk `ci` (mean width, middle sample). */
@@ -53,6 +55,7 @@ export function buildRoadMeshes(
   const at = (i: number) => samples[i % n];
   const road: RoadMeshes["road"] = [];
   const verge: Kn5MeshNode[] = [];
+  const openings: [number, number][][] = plan.roundabouts.map(() => []);
   // Distance along the road for UVs; loops keep counting past the end.
   const sAt = (i: number) => (i >= n ? plan.length : samples[i].s);
   // Sections on a roundabout: the ring mesh covers those, so the ribbon stops.
@@ -137,6 +140,9 @@ export function buildRoadMeshes(
       let dA = ang(R) - aL;
       while (dA > Math.PI) dA -= 2 * Math.PI;
       while (dA < -Math.PI) dA += 2 * Math.PI;
+      // The ring's verge and kerb stay out of this, plus 2.5 m either side.
+      const padA = 2.5 / Ro;
+      openings[k].push(dA >= 0 ? [aL - padA, aL + dA + padA] : [aL + dA - padA, aL + padA]);
       const steps = Math.max(2, Math.ceil(Math.abs(dA) * Ro / 1.5));
       const arc: Vec3[] = [];
       for (let k2 = 0; k2 <= steps; k2++) {
@@ -165,7 +171,7 @@ export function buildRoadMeshes(
       if (mb.indices.length) road.push(mb.toKn5(`1ROAD_RBC${k}_${j++}`, typeof m === "string" ? m : m.material));
     }
   });
-  return { road, verge };
+  return { road, verge, openings };
 }
 
 /**

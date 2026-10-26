@@ -501,7 +501,7 @@ $("build").onclick = async () => {
 function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<ImagerySource>, usedDem: Set<DemSource>): void {
   const s = r.stats;
   const rows: [string, string][] = [
-    ["Length", `${(s.length / 1000).toFixed(2)} km`],
+    ["Length", s.closed ? `${(s.length / 1000).toFixed(2)} km` : `${(s.timedLength / 1000).toFixed(2)} km timed, ${(s.length / 1000).toFixed(2)} km with run-up and run-off`],
     ["Layout", s.closed ? "Circuit" : "A to B"],
     ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m${usedDem.size ? ` (${[...usedDem].map((k) => DEM_LABEL[k]).join(" + ")} bare-earth model)` : ""}`],
     ["Climb", `${Math.round(s.climb)} m`],

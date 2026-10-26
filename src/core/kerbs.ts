@@ -286,3 +286,105 @@ export function stripPhotoTexture(plan: RoadPlan, raster: RasterSampler, opts: B
   }
   return { rgba, width: W, height: H };
 }
+
+/** Radius of a kerb return round the corner of a side street's mouth, metres. */
+export const RETURN_R = 4;
+
+/**
+ * Kerb returns: where a kerbed road meets a side street, the kerb curves
+ * round the corner into it on a 4 m radius, instead of stopping short. A
+ * small fan of asphalt fills the corner between the curve and the two
+ * road edges. Only for side streets meeting the road at about right angles.
+ */
+export function buildKerbReturns(
+  plan: RoadPlan,
+  opts: BuildOptions,
+  junctions: { seg: number; side: 1 | -1; width: number; dir: [number, number] }[],
+  kerb: [number[], number[]],
+  fillMaterial: string,
+): Kn5MeshNode[] {
+  const n = plan.samples.length;
+  const spacing = n > 1 ? plan.samples[1].s - plan.samples[0].s : 2;
+  const gutter = new MeshBuilder(), kb = new MeshBuilder(), strip = new MeshBuilder(), fill = new MeshBuilder();
+  const R = RETURN_R, STEPS = 8;
+  for (const j of junctions) {
+    const s = plan.samples[j.seg];
+    const side = j.side, k = side === 1 ? 0 : 1;
+    const v: [number, number] = [s.left[0] * side, s.left[1] * side], u = s.tan;
+    if (j.dir[0] * v[0] + j.dir[1] * v[1] < 0.8) continue; // oblique: leave it square
+    if (inRoundabout(plan, s.pos[0], s.pos[1], 15)) continue;
+    const half = s.width / 2, e = surfaceHeight(s, half * side, opts.crown);
+    const O: [number, number] = [s.pos[0] + v[0] * half, s.pos[1] + v[1] * half];
+    for (const c of [-1, 1] as const) {
+      // Only where the road's own kerb carries on past this corner.
+      const beyond = j.seg + c * Math.round((j.width / 2 + R + 2) / spacing);
+      if (beyond < 0 || beyond >= n || !(kerb[k][beyond] > 0)) continue;
+      const C: [number, number] = [O[0] + u[0] * c * (j.width / 2 + R) + v[0] * R, O[1] + u[1] * c * (j.width / 2 + R) + v[1] * R];
+      const A: [number, number] = [O[0] + u[0] * c * j.width / 2, O[1] + u[1] * c * j.width / 2];
+      // Point on the circle at angle th (0 on the road's edge, 90 degrees on the side street's) and radius r.
+      const at = (th: number, r: number): [number, number] => {
+        const dx = -v[0] * Math.cos(th) - u[0] * c * Math.sin(th), dy = -v[1] * Math.cos(th) - u[1] * c * Math.sin(th);
+        return [C[0] + dx * r, C[1] + dy * r];
+      };
+      // The kerb slopes away over the last quarter of the curve, where the side street (which has none) begins.
+      const kAt = (q: number) => Math.min(1, (1 - q) / 0.25);
+      const profile = (q: number) => {
+        const kk = kAt(q);
+        const top = e + KERB_H * kk;
+        return [
+          { mb: gutter, r0: R, z0: e, r1: R - GUTTER * kk, z1: e - GUTTER_DIP * kk },
+          { mb: kb, r0: R - GUTTER * kk, z1: top, r1: R - (GUTTER + FACE_RUN) * kk, z0: e - GUTTER_DIP * kk },
+          { mb: kb, r0: R - (GUTTER + FACE_RUN) * kk, z0: top, r1: R - KERB_BACK * kk, z1: top },
+          { mb: strip, r0: R - KERB_BACK * kk, z0: top, r1: 1, z1: top + 0.02 },
+        ];
+      };
+      for (let q = 0; q < STEPS; q++) {
+        const qa = q / STEPS, qb = (q + 1) / STEPS;
+        const ta = qa * Math.PI / 2, tb = qb * Math.PI / 2;
+        const pa = profile(qa), pb = profile(qb);
+        pa.forEach((g, gi) => {
+          const h = pb[gi];
+          const i = g.mb.vertexCount;
+          const vv = (th: number) => (th * R) / POUR;
+          g.mb.vertex([...at(ta, g.r0), g.z0], 0, vv(ta));
+          g.mb.vertex([...at(ta, g.r1), g.z1], 1, vv(ta));
+          g.mb.vertex([...at(tb, h.r1), h.z1], 1, vv(tb));
+          g.mb.vertex([...at(tb, h.r0), h.z0], 0, vv(tb));
+          // The kerb face looks out of the curve, at the road; everything else faces up.
+          const mid = at((ta + tb) / 2, R);
+          facingQuad(g.mb, i, gi === 1 ? [mid[0] - C[0], mid[1] - C[1], 0.3] : [0, 0, 1]);
+        });
+        // Asphalt between the corner of the two road edges and the curve.
+        const i = fill.vertexCount;
+        fill.vertex([...A, e - 0.01], 0, 0);
+        fill.vertex([...at(ta, R), e - 0.01], 1, 0);
+        fill.vertex([...at(tb, R), e - 0.01], 1, 1);
+        upTri(fill, i);
+      }
+    }
+  }
+  const out: Kn5MeshNode[] = [];
+  if (gutter.indices.length) out.push(gutter.toKn5("1ROAD_GUTTER_RET", "concrete"));
+  if (kb.indices.length) out.push(kb.toKn5("1KERB_RET", "concrete"));
+  if (strip.indices.length) out.push(strip.toKn5("1GRASS_STRIP_RET", "grass"));
+  if (fill.indices.length) out.push(fill.toKn5("1STREET_RETFILL", fillMaterial));
+  return out;
+}
+
+/** Quad from four vertices starting at i, wound so its normal leans toward `want`. */
+function facingQuad(mb: MeshBuilder, i: number, want: [number, number, number]): void {
+  const p = mb.positions, o = i * 3;
+  const a = [p[o + 3] - p[o], p[o + 4] - p[o + 1], p[o + 5] - p[o + 2]];
+  const b = [p[o + 6] - p[o], p[o + 7] - p[o + 1], p[o + 8] - p[o + 2]];
+  const nrm = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  if (nrm[0] * want[0] + nrm[1] * want[1] + nrm[2] * want[2] >= 0) mb.quad(i, i + 1, i + 2, i + 3);
+  else mb.quad(i, i + 3, i + 2, i + 1);
+}
+
+function upTri(mb: MeshBuilder, i: number): void {
+  const p = mb.positions;
+  const ax = p[(i + 1) * 3] - p[i * 3], ay = p[(i + 1) * 3 + 1] - p[i * 3 + 1];
+  const bx = p[(i + 2) * 3] - p[i * 3], by = p[(i + 2) * 3 + 1] - p[i * 3 + 1];
+  if (ax * by - ay * bx >= 0) mb.tri(i, i + 1, i + 2);
+  else mb.tri(i, i + 2, i + 1);
+}

@@ -272,7 +272,8 @@ export function buildSideStreets(
   for (const [mat, cm] of meshes) {
     for (const m of cm.all()) {
       m.normals = null; // from the faces
-      out.push(m.toKn5(`1ROAD_SIDE_${pad(i++)}`, mat));
+      // Drivable like the road, but not valid track: cutting through one is a shortcut.
+      out.push(m.toKn5(`1STREET_${pad(i++)}`, mat));
     }
   }
   return out;

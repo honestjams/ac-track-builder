@@ -251,18 +251,25 @@ export function buildMarkings(
   /** A paint patch from s0..s1 along and t0..t1 across, draped on the road. */
   const patch = (s0: number, s1: number, t0: number, t1: number) => {
     const steps = 3;
-    const mb = paint.next((steps + 1) * 2);
+    // Columns every half metre or so across, so the paint follows the crown instead of sinking into it.
+    const hi = Math.max(t0, t1), lo = Math.min(t0, t1);
+    const cols = Math.max(1, Math.ceil((hi - lo) / 0.5));
+    const mb = paint.next((steps + 1) * (cols + 1));
     const base = mb.vertexCount;
     for (let k = 0; k <= steps; k++) {
       const p = sampleAt(plan, s0 + ((s1 - s0) * k) / steps);
-      for (const t of [Math.max(t0, t1), Math.min(t0, t1)]) {
+      for (let c = 0; c <= cols; c++) {
+        const t = hi - ((hi - lo) * c) / cols;
         mb.vertex([p.pos[0] + p.left[0] * t, p.pos[1] + p.left[1] * t, surfaceHeight(p, t, opts.crown) + LIFT], 0, 0);
         mb.normals!.push(0, 0, 1);
       }
     }
+    const row = cols + 1;
     for (let k = 0; k < steps; k++) {
-      const a = base + k * 2, b = a + 2;
-      mb.quad(a, a + 1, b + 1, b);
+      for (let c = 0; c < cols; c++) {
+        const a = base + k * row + c, b = a + row;
+        mb.quad(a, a + 1, b + 1, b);
+      }
     }
   };
   /** Centre of the lane a lateral offset falls in, from the photo's lines where it has them. */
@@ -332,7 +339,15 @@ export function buildMarkings(
     if (skip(d.s) || d.s < 1 || d.s > end - 1) continue;
     const half = sampleAt(plan, d.s).width / 2 - 0.2;
     const side = d.t >= 0 ? 1 : -1;
-    if (d.kind === "stop") patch(d.s - 0.15, d.s + 0.15, 0, side * half);
+    if (d.kind === "start") patch(d.s - 0.2, d.s + 0.2, -half, half);
+    else if (d.kind === "finish") {
+      // Chequered: two rows of 0.5 m squares right across.
+      for (let row = 0; row < 2; row++) {
+        for (let t = -half, k = 0; t < half - 0.05; t += 0.5, k++) {
+          if ((k + row) % 2 === 0) patch(d.s - 0.5 + row * 0.5, d.s + row * 0.5, t, Math.min(half, t + 0.5));
+        }
+      }
+    } else if (d.kind === "stop") patch(d.s - 0.15, d.s + 0.15, 0, side * half);
     else if (d.kind === "giveway") {
       for (let t = 0.1; t < half; t += 1.2) patch(d.s - 0.15, d.s + 0.15, side * t, side * Math.min(half, t + 0.6));
     } else if (d.kind === "zebra") {
@@ -368,7 +383,7 @@ export function buildMarkings(
 export interface DiscreteMark {
   s: number;
   t: number;
-  kind: "stop" | "giveway" | "zebra" | "arrow" | "text";
+  kind: "stop" | "giveway" | "zebra" | "arrow" | "text" | "start" | "finish";
   /** Arrow: left, right, straight, split-left-or-straight, ...; text: the characters. */
   shape?: string;
 }

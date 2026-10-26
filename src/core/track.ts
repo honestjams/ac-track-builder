@@ -12,10 +12,11 @@ import { frameTransform, IDENTITY, writeKn5, type Kn5GroupNode, type Kn5Material
 import { toAc } from "./mesh";
 import { withDefaults, type BuildOptions } from "./options";
 import { simplify } from "./polyline";
-import { applyElevation, inRoundabout, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
+import { applyElevation, inRoundabout, isLoop, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
+import { extendRoute } from "./extend";
 import { buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
-import { buildKerbs, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
+import { buildKerbReturns, buildKerbs, KERB_BACK, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
 import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1 } from "./dds";
 import { buildMarkings, type DiscreteMark } from "./markings";
@@ -87,6 +88,8 @@ export interface TrackResult {
   previewTextures: Record<string, { rgba: Uint8Array; width: number; height: number }>;
   stats: {
     length: number;
+    /** Between the start and finish lines (the whole road on a loop). */
+    timedLength: number;
     closed: boolean;
     minElevation: number;
     maxElevation: number;
@@ -118,6 +121,22 @@ export interface TrackResult {
 
 const enc = new TextEncoder();
 const MIN_LENGTH = 300;
+/** Clear road between the front row of the grid and the start line, and before the back row. */
+const GRID_DEPTH = 14;
+
+/** The sample at a pin: nearest to it among those about `est` metres along the road. */
+function sampleNearPin(plan: RoadPlan, pin: Vec2, est: number): number {
+  let best = 0, bestD = Infinity;
+  plan.samples.forEach((s, i) => {
+    if (Math.abs(s.s - est) > 40) return;
+    const d = Math.hypot(s.pos[0] - pin[0], s.pos[1] - pin[1]);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  });
+  return best;
+}
 
 /** Point on the road at distance s (wrapping on loops), lateral offset t, and its heading. */
 function along(plan: RoadPlan, s: number, t: number, lift: number, crown: number) {
@@ -151,7 +170,9 @@ function trackObjects(plan: RoadPlan, opts: BuildOptions): Kn5GroupNode[] {
   };
   const place = (name: string, s: number, t: number, lift: number) => {
     const p = along(plan, s, t, lift, opts.crown);
-    out.push(dummy(name, frameTransform(p.pos, p.fwd)));
+    // The game takes a dummy's -Z as the way the car faces (with +Z, cars
+    // spawned facing back down the road), so Z points back along the road.
+    out.push(dummy(name, frameTransform(p.pos, [-p.fwd[0], -p.fwd[1], -p.fwd[2]])));
   };
 
   if (plan.closed) {
@@ -166,8 +187,9 @@ function trackObjects(plan: RoadPlan, opts: BuildOptions): Kn5GroupNode[] {
     place("AC_TIME_0_L", line, half, 1);
     place("AC_TIME_0_R", line, -half, 1);
   } else {
-    const startLine = 14 + rows * 8;
+    // Start and finish lines on the pins when there's a run-up and run-off; otherwise just inside the ends.
     const end = plan.samples[plan.samples.length - 1].s;
+    const startLine = plan.timed ? Math.max(GRID_DEPTH + rows * 8, plan.samples[plan.timed.start].s) : GRID_DEPTH + rows * 8;
     for (let k = 0; k < opts.pitCount; k++) {
       const { s, t } = slot(k, startLine);
       place(`AC_START_${k}`, s, t, 0.5);
@@ -177,7 +199,7 @@ function trackObjects(plan: RoadPlan, opts: BuildOptions): Kn5GroupNode[] {
     const startHalf = along(plan, startLine, 0, 0, 0).sample.width / 2 + 1;
     place("AC_AB_START_L", startLine, startHalf, 1);
     place("AC_AB_START_R", startLine, -startHalf, 1);
-    const finish = end - 25;
+    const finish = plan.timed ? Math.min(end - 25, plan.samples[plan.timed.finish].s) : end - 25;
     const finishHalf = along(plan, finish, 0, 0, 0).sample.width / 2 + 1;
     place("AC_AB_FINISH_L", finish, finishHalf, 1);
     place("AC_AB_FINISH_R", finish, -finishHalf, 1);
@@ -223,8 +245,15 @@ export async function buildTrack(
   const local = route.map((p) => proj.toLocal(p));
   const widthFn = sources.widthAt ? (x: number, y: number) => sources.widthAt!(proj.toLngLat([x, y])) : undefined;
   const circles = resolveRoundabouts(sources.roundabouts ?? [], sources.osm?.roundaboutRings ?? [], proj);
-  const plan = planRoad(local, opts, widthFn, circles);
-  if (plan.length < MIN_LENGTH) throw new Error(`Road is ${Math.round(plan.length)} m; make it at least ${MIN_LENGTH} m`);
+  // Point to point: room to line up and get going before the start pin, and to brake after the finish pin.
+  const rows = Math.ceil(opts.pitCount / 2);
+  const ext = !isLoop(local) && (opts.runUp > 0 || opts.runOff > 0)
+    ? extendRoute(local, (sources.streets?.lines ?? []).map((l) => l.pts.map((p) => proj.toLocal(p))), GRID_DEPTH + rows * 8 + opts.runUp, opts.runOff)
+    : null;
+  const plan = planRoad(ext?.path ?? local, opts, widthFn, circles);
+  if (ext) plan.timed = { start: sampleNearPin(plan, local[0], ext.startAt), finish: sampleNearPin(plan, local[local.length - 1], ext.finishAt) };
+  const timedLength = () => (plan.timed ? plan.samples[plan.timed.finish].s - plan.samples[plan.timed.start].s : plan.length);
+  if (timedLength() < MIN_LENGTH) throw new Error(`Road is ${Math.round(timedLength())} m; make it at least ${MIN_LENGTH} m`);
 
   // Put the road where the aerial photos show it, at the width they show.
   let raster: RasterSampler | null = null;
@@ -421,13 +450,25 @@ export async function buildTrack(
       const houses = centres.filter(near(150)).length, grid = streets.filter((st) => st.pts.some(near(120))).length;
       town.push(houses >= 20 || grid >= 5 ? 2 : houses >= 8 || grid >= 3 ? 1 : 0);
     });
-    // Kerbs stop clear of a side street's mouth, and wherever the nature
-    // strip would run into another street beside the road.
+    // A kerb must never stand on anything drivable: none across a side
+    // street's mouth, on the inside of a turn too tight for the strip (it
+    // would fold over onto the road), or anywhere its gutter, kerb or strip
+    // would land on another street, a roundabout or another stretch of the
+    // route itself.
     const kerbBlocked = (i: number, side: 1 | -1) => {
       const s = plan.samples[i];
       if (streetPlan.junctions.some((j) => j.side === side && Math.abs(j.s - s.s) < j.width / 2 + 4)) return true;
-      const t = (s.width / 2 + opts.vergeWidth + STRIP_EXTRA) * side;
-      return streetIndex.clearance(s.pos[0] + s.left[0] * t, s.pos[1] + s.left[1] * t) < 0.5;
+      const half = s.width / 2, reach = half + opts.vergeWidth + STRIP_EXTRA;
+      const inside = s.curvature * side;
+      if (inside > 0 && 1 / inside < reach + 3) return true;
+      for (const t of [half + 0.3, half + KERB_BACK, half + 1.5, reach]) {
+        const x = s.pos[0] + s.left[0] * t * side, y = s.pos[1] + s.left[1] * t * side;
+        if (inRoundabout(plan, x, y, 1.5) || streetIndex.clearance(x, y) < 0.5) return true;
+        // Clearly on the route's asphalt (another stretch of it).
+        const n = index.nearest(x, y, 30);
+        if (n && n.dist < index.at(n).width / 2 - 0.2) return true;
+      }
+      return false;
     };
     kerbs = planKerbs(plan, evidence, (i) => town[i], kerbBlocked);
     // A roundabout is kerbed when the road is kerbed coming up to it.
@@ -439,6 +480,19 @@ export async function buildTrack(
   const kerbAt = (i: number, side: 1 | -1) => kerbs[side === 1 ? 0 : 1][((i % nS) + nS) % nS] > 0;
   // The gravel verge gives way to the kerb's nature strip, which also covers the slopes where kerbs start and end.
   const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % nS].s) || kerbAt(i, side));
+  plan.roundabouts.forEach((rb, k) => {
+    const open = [...roadMeshes.openings[k]];
+    // Side streets that run into the ring get an opening in its verge and kerb too.
+    const Ro = outerRadius(rb);
+    for (const st of streetPlan.streets) {
+      for (const p of [st.pts[0], st.pts[st.pts.length - 1]]) {
+        if (Math.hypot(p[0] - rb.c[0], p[1] - rb.c[1]) > Ro + 6) continue;
+        const a = Math.atan2(p[1] - rb.c[1], p[0] - rb.c[0]), half = (st.width / 2 + 2.5) / Ro;
+        open.push([a - half, a + half]);
+      }
+    }
+    if (open.length) rb.openings = open;
+  });
   // Nature strips: the aerial photo of the strip itself when there is one, so footpaths and driveways show.
   const stripMaterial: StripMaterialFn = (ci, a, b) => {
     if (!raster || opts.imageryZoom <= 0) return { material: "grass", photo: false };
@@ -450,6 +504,8 @@ export async function buildTrack(
     return { material: name, photo: true };
   };
   const kerbMeshes = buildKerbs(plan, opts, kerbs, stripMaterial);
+  // And round the corners into side streets.
+  const kerbReturns = opts.kerbs ? buildKerbReturns(plan, opts, streetPlan.junctions, kerbs, roadMaterial(0, 6, { ...plan.samples[0], kerb: [1, 1] })) : [];
   // Photo surface on the traced side streets too (the nearest 40, to keep the file in check).
   const photoStreets = new Set(
     opts.roadSurface === "photo" && raster
@@ -512,7 +568,14 @@ export async function buildTrack(
     ? buildMarkings(plan, opts, (sd) => {
       const p = sampleNear(sd).pos;
       return !!inRoundabout(plan, p[0], p[1], 1);
-    }, (side, sd) => mouth(side, sd) || kerbAt(Math.round(sd / opts.spacing), side), { lines: imageLines, covered }, discreteMarks())
+    }, (side, sd) => mouth(side, sd) || kerbAt(Math.round(sd / opts.spacing), side), { lines: imageLines, covered }, [
+      ...discreteMarks(),
+      // The start and finish lines themselves, painted across the road.
+      ...(plan.timed ? [
+        { s: plan.samples[plan.timed.start].s, t: 0, kind: "start" as const },
+        { s: plan.samples[plan.timed.finish].s, t: 0, kind: "finish" as const },
+      ] : []),
+    ])
     : [];
   // The full circulating carriageway and island of each roundabout.
   const ringNodes: Kn5Node[] = [];
@@ -605,7 +668,7 @@ export async function buildTrack(
       group("ROUNDABOUTS", [...ringNodes, ...shrubs, ...ringWalls]),
       group("MARKINGS", markings),
       group("VERGE", roadMeshes.verge),
-      group("KERBS", [...kerbMeshes.gutter, ...kerbMeshes.kerb, ...kerbMeshes.strip]),
+      group("KERBS", [...kerbMeshes.gutter, ...kerbMeshes.kerb, ...kerbMeshes.strip, ...kerbReturns]),
       group("TERRAIN", terrainNodes),
       group("WALLS", walls),
       group("HORIZON", backdropNodes),
@@ -632,7 +695,7 @@ export async function buildTrack(
     [`${slug}/data/map.ini`]: enc.encode(map.ini),
     [`${slug}/map.png`]: map.png,
     [`${slug}/ui/ui_track.json`]: enc.encode(uiTrackJson(trackMeta, {
-      length: plan.length, width: meanWidth, pitboxes: opts.pitCount, closed: plan.closed, centre,
+      length: timedLength(), width: meanWidth, pitboxes: opts.pitCount, closed: plan.closed, centre,
     })),
     [`${slug}/ui/outline.png`]: outlinePng(outline2d),
     [`${slug}/ui/preview.png`]: previewPng(outline2d, plan.closed),
@@ -648,6 +711,7 @@ export async function buildTrack(
     slug, files, model, plan, proj, previewTextures,
     stats: {
       length: plan.length,
+      timedLength: timedLength(),
       closed: plan.closed,
       minElevation: Math.min(...hs),
       maxElevation: Math.max(...hs),

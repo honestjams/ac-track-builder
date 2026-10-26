@@ -17,12 +17,13 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | --- | --- | --- |
 | 1 | The track shows in Content Manager with name, length, country, outline and preview | `ui/ui_track.json`, `ui/*.png` |
 | 2 | The game loads without a crash | kn5 layout (`src/core/kn5.ts`), material shader names |
-| 3 | The car spawns on the road, facing up the road, not in the air or under it | `AC_PIT_n` / `AC_START_n` transforms in `track.ts` (Z = forward, Y = up) |
+| 3 | The car spawns on the road, facing up the road, not in the air or under it | `AC_PIT_n` / `AC_START_n` transforms in `track.ts`: the game faces the car along the dummy's -Z (Y up). With +Z, cars spawned facing back down the road |
 | 4 | Driving feels like asphalt; the verge and terrain feel like grass | `data/surfaces.ini`, mesh name prefixes `1ROAD_`, `1GRASS_` |
 | 5 | The invisible walls stop the car, and you can't see them | `1WALL_*` meshes with `renderable=false` |
 | 6 | Aerial textures show on the terrain (not black or pink) | DDS DXT1 encoder (`src/core/dds.ts`) |
 | 7 | Road markings run the right way and aren't mirrored | UV `v` direction (kn5 `v = 0` is the image top) |
-| 8 | Crossing the start line starts the timer; crossing the finish stops it | `AC_AB_START_L/R`, `AC_AB_FINISH_L/R` |
+| 8 | Crossing the painted start line starts the timer; crossing the chequered finish line stops it (Practice and Hotlap) | `AC_AB_START_L/R`, `AC_AB_FINISH_L/R` on the pins; run-up and run-off from `extend.ts` |
+| 22 | Cutting through a side street or across grass invalidates the run; the route, its gutters and kerbs don't | `STREET` / `GRASS` (`IS_VALID_TRACK=0`) in `surfaces.ini` |
 | 9 | The in-game map (F-key apps / map app) shows the road in the right place | `data/map.ini` offsets and `SCALE_FACTOR` |
 | 10 | AI cars drive the road (Race / Track Day with AI) | `ai/fast_lane.ai`; see note below |
 | 11 | Horizon hills show and there's no visible ledge where they meet the near terrain | `src/core/backdrop.ts` `SINK` |
