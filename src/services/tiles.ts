@@ -230,9 +230,15 @@ async function stateDemTiles(src: DemSource, z: number, list: { x: number; y: nu
     }
   };
   if (src === "vic") {
+    // The cache only reliably goes to zoom 15 (the data is 10 m anyway): finer tiles are cut from their zoom 15 parent.
+    const zv = Math.min(z, 15), up = z - zv;
+    const parents = new Map<string, Promise<Float32Array | null | undefined>>();
     for (const { x, y } of list) {
       jobs.push(async () => {
-        const h = await attempt(() => lercTile(`${STATE_DEMS.vic.url}/${z}/${y}/${x}`));
+        const px = x >> up, py = y >> up, pk = `${px},${py}`;
+        if (!parents.has(pk)) parents.set(pk, attempt(() => lercTile(`${STATE_DEMS.vic.url}/${zv}/${py}/${px}`)));
+        const parent = await parents.get(pk);
+        const h = parent ? (up ? upsample(parent, x - (px << up), y - (py << up), up) : parent) : null;
         out.set(`${x},${y}`, h && h.some(usable) ? h : null);
       });
     }
@@ -264,6 +270,24 @@ async function stateDemTiles(src: DemSource, z: number, list: { x: number; y: nu
   }
   // A few requests at a time.
   for (let k = 0; k < jobs.length; k += 4) await Promise.all(jobs.slice(k, k + 4).map((j) => j()));
+  return out;
+}
+
+/** The (ox, oy) sub-tile, 2^up to a side, of a 256 x 256 tile, resampled (bilinear) to 256 x 256. */
+export function upsample(parent: Float32Array, ox: number, oy: number, up: number): Float32Array {
+  const out = new Float32Array(256 * 256), span = 256 >> up, k = 1 << up;
+  for (let r = 0; r < 256; r++) {
+    // Child pixel centre in parent pixel-index space (parent centres at integers).
+    const fy = Math.max(0, Math.min(254.999, oy * span + (r + 0.5) / k - 0.5));
+    const y0 = Math.floor(fy), ty = fy - y0;
+    for (let c = 0; c < 256; c++) {
+      const fx = Math.max(0, Math.min(254.999, ox * span + (c + 0.5) / k - 0.5));
+      const x0 = Math.floor(fx), tx = fx - x0;
+      const i = y0 * 256 + x0;
+      const top = parent[i] + (parent[i + 1] - parent[i]) * tx, bot = parent[i + 256] + (parent[i + 257] - parent[i + 256]) * tx;
+      out[r * 256 + c] = top + (bot - top) * ty;
+    }
+  }
   return out;
 }
 
