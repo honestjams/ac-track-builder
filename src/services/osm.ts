@@ -20,10 +20,12 @@ export interface Route {
   distance: number;
   /** Where the route goes round a roundabout, with the arc it drives. */
   roundabouts: RoundaboutHint[];
+  /** Where the route turns back on itself (usually a pin snapped to the wrong side of the road). */
+  uturns: LngLat[];
 }
 
 interface OsrmStep {
-  maneuver: { type: string; location: LngLat };
+  maneuver: { type: string; modifier?: string; location: LngLat };
   geometry: { coordinates: LngLat[] };
 }
 
@@ -39,7 +41,8 @@ export async function route(pins: LngLat[], signal?: AbortSignal): Promise<Route
   const roundabouts = steps
     .filter((st) => /^(roundabout|rotary|roundabout turn)$/.test(st.maneuver.type))
     .map((st) => ({ location: st.maneuver.location, arc: st.geometry.coordinates }));
-  return { coords: body.routes[0].geometry.coordinates, distance: body.routes[0].distance, roundabouts };
+  const uturns = steps.filter((st) => st.maneuver.modifier === "uturn").map((st) => st.maneuver.location);
+  return { coords: body.routes[0].geometry.coordinates, distance: body.routes[0].distance, roundabouts, uturns };
 }
 
 export interface Place {
