@@ -237,6 +237,11 @@ async function doRoute(): Promise<void> {
       err.textContent = "Make the road at least 300 m long.";
       err.hidden = false;
     }
+    if (r.uturns.length && err.hidden) {
+      const [lng, lat] = r.uturns[0];
+      err.textContent = `The route turns back on itself near ${lat.toFixed(5)}, ${lng.toFixed(5)}, which builds a hairpin spike. Move or remove the pin there.`;
+      err.hidden = false;
+    }
     updateBuildButton();
     suggestName(r);
   } catch (e) {
