@@ -3,6 +3,7 @@ import { buildTrack, type DataSources } from "../src/core/track";
 import { DemGrid } from "../src/core/elevation";
 import type { LngLat } from "../src/core/geo";
 import { encodePng } from "../src/core/png";
+import type { Kn5Node } from "../src/core/kn5";
 
 const lat0 = -27.92, lng0 = 153.19;
 const mx = 111_320 * Math.cos((lat0 * Math.PI) / 180), my = 111_320;
@@ -24,7 +25,7 @@ describe("timing gate signs", async () => {
   const plan = result.plan;
   const art = (() => {
     const pts: [number, number, number][] = [];
-    const walk = (n: (typeof result.model)["root"]) => {
+    const walk = (n: Kn5Node): void => {
       if (n.kind === "mesh") {
         if (n.name.startsWith("FURNITURE_SIGNART")) for (let i = 0; i < n.positions.length; i += 3) pts.push([n.positions[i], -n.positions[i + 2], n.positions[i + 1]]);
       } else n.children.forEach(walk);
