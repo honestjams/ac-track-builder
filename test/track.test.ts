@@ -3,6 +3,8 @@ import { unzipSync } from "fflate";
 import { buildTrack, type DataSources } from "../src/core/track";
 import { DemGrid } from "../src/core/elevation";
 import { readKn5, type Kn5Node } from "../src/core/kn5";
+import { clearOfRoute, KEEP_OFF, onRoute } from "../src/core/clearance";
+import { SegmentIndex } from "../src/core/road";
 import { readFastLaneAi } from "../src/core/aiSpline";
 import { zipTrack } from "../src/core/zip";
 import type { LngLat } from "../src/core/geo";
@@ -63,7 +65,7 @@ describe("buildTrack (synthetic terrain)", async () => {
     const names = nodes.map((n) => n.name);
     for (const m of meshes) {
       // physical surfaces, or non-collidable horizon and scenery
-      expect(m.name).toMatch(/^(1(ROAD|STREET|GRASS|WALL|KERB)_|BACKDROP_|TREES_|GUIDEPOSTS_|RAILPOSTS_|ROOF_|MARKINGS_|RRPM_)/);
+      expect(m.name).toMatch(/^(1(ROAD|STREET|GRASS|WALL|KERB)_|BACKDROP_|TREES_|GUIDEPOSTS_|RAILPOSTS_|ROOF_|MARKINGS_|RRPM_|FURNITURE_)/);
       if (m.kind !== "mesh") continue;
       expect(m.positions.every(Number.isFinite)).toBe(true);
       expect(m.normals.every(Number.isFinite)).toBe(true);
@@ -106,6 +108,16 @@ describe("buildTrack (synthetic terrain)", async () => {
       const tan = plan.samples[n].tan;
       const facing = [-t[8], t[10]]; // -Z in local east, north
       expect(facing[0] * tan[0] + facing[1] * tan[1]).toBeGreaterThan(0.95);
+      // On the asphalt, not the verge.
+      const p = plan.samples[n];
+      const lateral = Math.abs((x - p.pos[0]) * p.left[0] + (y - p.pos[1]) * p.left[1]);
+      expect(lateral).toBeLessThan(p.width / 2 - 0.5);
+    }
+    // Nothing that must stay off the road is on it.
+    const onRoad = onRoute(plan, new SegmentIndex(plan));
+    for (const m of nodes) {
+      if (m.kind !== "mesh" || !KEEP_OFF.test(m.name)) continue;
+      expect(clearOfRoute(m, onRoad).dropped).toBe(0);
     }
   });
 
@@ -162,3 +174,25 @@ describe("buildTrack (synthetic terrain)", async () => {
     expect(back["test_hairpin/test_hairpin.kn5"].length).toBe(result.stats.kn5Bytes);
   });
 });
+
+describe("start and finish on a long road drawn with jitter", async () => {
+  // 4 km of gentle S-bends drawn with 1.5 m of zig-zag jitter, as routing
+  // data often is: smoothing takes the jitter out and the road comes out
+  // well over 40 m shorter than the path drawn (the old search window).
+  const lat0 = -27.92, lng0 = 153.19;
+  const mx = 111_320 * Math.cos((lat0 * Math.PI) / 180), my = 111_320;
+  const route: LngLat[] = [];
+  for (let x = 0, k = 0; x <= 4000; x += 5, k++) route.push([lng0 + x / mx, lat0 + (Math.sin(x / 150) * 40 + (k % 2 ? 1.5 : -1.5)) / my]);
+  const result = await buildTrack(route, { name: "Wiggles", imageryZoom: 0, corridor: 40, horizon: 0, trees: 0, buildings: false }, sources);
+
+  it("puts the finish gate on pin B, not somewhere else", () => {
+    const { plan } = result;
+    const pinB = result.proj.toLocal(route[route.length - 1]);
+    const finish = plan.samples[plan.timed!.finish].pos;
+    expect(Math.hypot(finish[0] - pinB[0], finish[1] - pinB[1])).toBeLessThan(5);
+    const pinA = result.proj.toLocal(route[0]);
+    const start = plan.samples[plan.timed!.start].pos;
+    expect(Math.hypot(start[0] - pinA[0], start[1] - pinA[1])).toBeLessThan(5);
+  });
+});
+

@@ -287,6 +287,33 @@ function boxFor(req: ArtRequest, measure: OffscreenCanvasRenderingContext2D): Bo
           ctx.fillText(text || "i", x + 80, y + 82);
         },
       };
+    case "gate": {
+      // START: white on green. FINISH: chequered band with the word on black.
+      const finish = text === "FINISH";
+      return {
+        w: 480, h: 150, draw(ctx, x, y) {
+          ctx.fillStyle = finish ? "#111" : "#1d7a3a";
+          ctx.fillRect(x, y, 480, 150);
+          if (finish) {
+            for (let c = 0; c < 24; c++) {
+              for (let r = 0; r < 2; r++) {
+                ctx.fillStyle = (c + r) % 2 ? "#111" : "#f4f4f4";
+                ctx.fillRect(x + c * 20, y + r * 20, 20, 20);
+                ctx.fillRect(x + c * 20, y + 110 + r * 20, 20, 20);
+              }
+            }
+          }
+          ctx.strokeStyle = "#f4f4f4";
+          ctx.lineWidth = 6;
+          ctx.strokeRect(x + 3, y + 3, 474, 144);
+          ctx.fillStyle = "#f4f4f4";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          fitText(ctx, text, "bold", finish ? 60 : 90, 420);
+          ctx.fillText(text, x + 240, y + 77);
+        },
+      };
+    }
     case "back":
       return {
         w: 32, h: 32, draw(ctx, x, y) {

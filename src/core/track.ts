@@ -8,12 +8,13 @@ import { writeFastLaneAi } from "./aiSpline";
 import { outlinePng, previewPng, readme, slugify, surfacesIni, trackMap, uiTrackJson, type TrackMeta } from "./acFiles";
 import type { HeightFn } from "./elevation";
 import { boundsOf, LocalProjection, type Bounds, type LngLat, type Vec2 } from "./geo";
-import { frameTransform, IDENTITY, writeKn5, type Kn5GroupNode, type Kn5Material, type Kn5Model, type Kn5Node, type Kn5Texture } from "./kn5";
+import { frameTransform, IDENTITY, writeKn5, type Kn5GroupNode, type Kn5Material, type Kn5MeshNode, type Kn5Model, type Kn5Node, type Kn5Texture } from "./kn5";
 import { toAc } from "./mesh";
 import { withDefaults, type BuildOptions } from "./options";
 import { simplify } from "./polyline";
 import { applyElevation, inRoundabout, isLoop, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
-import { extendRoute } from "./extend";
+import { extendRoute, pathLength } from "./extend";
+import { keepOffRoute, onRoute } from "./clearance";
 import { buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
 import { buildKerbReturns, buildKerbs, KERB_BACK, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
@@ -28,7 +29,7 @@ import {
 import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
-import { buildPieces, landmarks, seenFeatures, streetSigns } from "./furniture";
+import { buildPieces, gateSigns, landmarks, seenFeatures, streetSigns } from "./furniture";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, displayOf, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, streetSurface, type StreetLine, type StreetName } from "./sideStreets";
@@ -126,18 +127,28 @@ const MIN_LENGTH = 300;
 /** Clear road between the front row of the grid and the start line, and before the back row. */
 const GRID_DEPTH = 14;
 
-/** The sample at a pin: nearest to it among those about `est` metres along the road. */
-function sampleNearPin(plan: RoadPlan, pin: Vec2, est: number): number {
-  let best = 0, bestD = Infinity;
-  plan.samples.forEach((s, i) => {
-    if (Math.abs(s.s - est) > 40) return;
-    const d = Math.hypot(s.pos[0] - pin[0], s.pos[1] - pin[1]);
-    if (d < bestD) {
-      bestD = d;
-      best = i;
-    }
-  });
-  return best;
+/**
+ * The sample at a pin: nearest to it among those about `frac` of the way
+ * along the road (smoothing shortens the road a little, so distances along
+ * the original path only say roughly where to look; on a road that passes
+ * the same spot twice, this keeps to the right pass).
+ */
+function sampleNearPin(plan: RoadPlan, pin: Vec2, frac: number): number {
+  const last = plan.samples[plan.samples.length - 1].s;
+  const est = frac * last, window = Math.max(60, last * 0.05);
+  let best = -1, bestD = Infinity;
+  for (const pass of [window, Infinity]) {
+    plan.samples.forEach((s, i) => {
+      if (Math.abs(s.s - est) > pass) return;
+      const d = Math.hypot(s.pos[0] - pin[0], s.pos[1] - pin[1]);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    if (best >= 0) break;
+  }
+  return Math.max(0, best);
 }
 
 /** Point on the road at distance s (wrapping on loops), lateral offset t, and its heading. */
@@ -253,7 +264,10 @@ export async function buildTrack(
     ? extendRoute(local, (sources.streets?.lines ?? []).map((l) => l.pts.map((p) => proj.toLocal(p))), GRID_DEPTH + rows * 8 + opts.runUp, opts.runOff)
     : null;
   const plan = planRoad(ext?.path ?? local, opts, widthFn, circles);
-  if (ext) plan.timed = { start: sampleNearPin(plan, local[0], ext.startAt), finish: sampleNearPin(plan, local[local.length - 1], ext.finishAt) };
+  if (ext) {
+    const total = pathLength(ext.path);
+    plan.timed = { start: sampleNearPin(plan, local[0], ext.startAt / total), finish: sampleNearPin(plan, local[local.length - 1], ext.finishAt / total) };
+  }
   const timedLength = () => (plan.timed ? plan.samples[plan.timed.finish].s - plan.samples[plan.timed.start].s : plan.length);
   if (timedLength() < MIN_LENGTH) throw new Error(`Road is ${Math.round(timedLength())} m; make it at least ${MIN_LENGTH} m`);
 
@@ -700,6 +714,7 @@ export async function buildTrack(
     ...(opts.landmarks ? landmarks((sources.pois ?? []).map((p) => ({ ...p, at: proj.toLocal(p.at) })), plan, index, opts, art,
       (x, y) => Math.min(streetIndex.clearance(x, y), ...kept.map((b) => (pointInside(x, y, b.ring) ? -1 : Infinity)))) : []),
     ...seenFeatures((sources.seen ?? []).map((f) => ({ ...f, at: proj.toLocal(f.at) })), plan, index, opts, art),
+    ...gateSigns(plan, opts, art),
   ];
   let atlas = null;
   if (sources.renderArt && art.list.length) {
@@ -711,6 +726,12 @@ export async function buildTrack(
   const houses = buildBuildings(opts.horizon > 0 ? kept : kept.filter((b) => b.ring.every(([x, y]) => index.nearest(x, y, opts.corridor - 1))), buildingGround);
 
   const group = (name: string, children: Kn5Node[]): Kn5GroupNode => ({ kind: "node", name, transform: IDENTITY, children });
+  // Last check: no kerb, strip, gutter or rail triangle stands on the route's asphalt.
+  const onRoad = onRoute(plan, index);
+  const meshesOf = (nodes: Kn5Node[]) => nodes.filter((n): n is Kn5MeshNode => n.kind === "mesh");
+  const kerbsClear = keepOffRoute([...kerbMeshes.gutter, ...kerbMeshes.kerb, ...kerbMeshes.strip, ...kerbReturns], onRoad);
+  const ringsClear = keepOffRoute(meshesOf(ringNodes), onRoad);
+  const railsClear = keepOffRoute(rails.rails, onRoad);
   const slug = slugify(opts.name);
   const model: Kn5Model = {
     textures,
@@ -719,15 +740,15 @@ export async function buildTrack(
       group("ROAD", roadMeshes.road),
       group("SIDESTREETS", sideStreets),
       group("FURNITURE", furniture),
-      group("ROUNDABOUTS", [...ringNodes, ...shrubs, ...ringWalls]),
+      group("ROUNDABOUTS", [...ringsClear.nodes, ...shrubs, ...ringWalls]),
       group("MARKINGS", markings),
       group("VERGE", roadMeshes.verge),
-      group("KERBS", [...kerbMeshes.gutter, ...kerbMeshes.kerb, ...kerbMeshes.strip, ...kerbReturns]),
+      group("KERBS", kerbsClear.nodes),
       group("TERRAIN", terrainNodes),
       group("WALLS", walls),
       group("HORIZON", backdropNodes),
       group("TREES", trees),
-      group("RAILS", [...rails.rails, ...rails.posts]),
+      group("RAILS", [...railsClear.nodes, ...rails.posts]),
       group("GUIDEPOSTS", posts),
       group("BUILDINGS", houses),
       ...trackObjects(plan, opts),

@@ -24,6 +24,7 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 7 | Road markings run the right way and aren't mirrored | UV `v` direction (kn5 `v = 0` is the image top) |
 | 8 | Crossing the painted start line starts the timer; crossing the chequered finish line stops it (Practice and Hotlap) | `AC_AB_START_L/R`, `AC_AB_FINISH_L/R` on the pins; run-up and run-off from `extend.ts` |
 | 22 | Cutting through a side street or across grass invalidates the run; the route, its gutters and kerbs don't | `STREET` / `GRASS` (`IS_VALID_TRACK=0`) in `surfaces.ini` |
+| 23 | Nothing solid on the driving line: you can drive straight through every roundabout entry and exit, turn and junction without touching a kerb | `kerbBlocked` in `track.ts`, ring openings, and the last-pass `clearance.ts` |
 | 9 | The in-game map (F-key apps / map app) shows the road in the right place | `data/map.ini` offsets and `SCALE_FACTOR` |
 | 10 | AI cars drive the road (Race / Track Day with AI) | `ai/fast_lane.ai`; see note below |
 | 11 | Horizon hills show and there's no visible ledge where they meet the near terrain | `src/core/backdrop.ts` `SINK` |

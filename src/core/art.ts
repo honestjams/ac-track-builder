@@ -17,7 +17,8 @@ export type ArtKind =
   | "keepleft"
   | "bus" // bus stop plate
   | "info" // blue square, text = short label
-  | "back"; // plain grey back of a sign
+  | "back" // plain grey back of a sign
+  | "gate"; // timing gate sign: text = "START" or "FINISH"
 
 export interface ArtRequest {
   key: string;

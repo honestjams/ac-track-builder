@@ -331,3 +331,29 @@ export function buildPieces(pieces: Piece[], atlas: ArtAtlas | null): Kn5MeshNod
   for (const [m, cm] of byMat) cm.all().forEach((mb, i) => out.push(mb.toKn5(`FURNITURE_${m.toUpperCase()}_${pad(i)}`, m)));
   return out;
 }
+
+/**
+ * START and FINISH signs at the timing gates: one each side of the road on
+ * a pair of posts, readable from both ways.
+ */
+export function gateSigns(plan: RoadPlan, opts: BuildOptions, art: ArtList): Piece[] {
+  if (!plan.timed) return [];
+  const out: Piece[] = [];
+  for (const [i, text] of [[plan.timed.start, "START"], [plan.timed.finish, "FINISH"]] as const) {
+    const s = plan.samples[i];
+    if (inRoundabout(plan, s.pos[0], s.pos[1], 8)) continue;
+    const key = art.add({ key: `gate-${text}`, kind: "gate", text });
+    for (const side of [1, -1] as const) {
+      // Beyond the verge or nature strip, clear of the road.
+      const t = (s.width / 2 + opts.vergeWidth + 1.8) * side;
+      const at: Vec2 = [s.pos[0] + s.left[0] * t, s.pos[1] + s.left[1] * t];
+      const z = vergeZ(s, t, opts);
+      for (const d of [-0.75, 0.75]) {
+        // Posts at the sign's ends (it spans across the road's direction).
+        out.push({ kind: "box", at: [at[0] + s.left[0] * d, at[1] + s.left[1] * d], along: s.tan, length: 0.08, depth: 0.08, z0: z - 0.4, z1: z + 2.9, material: "steel" });
+      }
+      out.push({ kind: "face", at, normal: [-s.tan[0], -s.tan[1]], z0: z + 2.2, height: 0.62, art: key, twoSided: true });
+    }
+  }
+  return out;
+}
