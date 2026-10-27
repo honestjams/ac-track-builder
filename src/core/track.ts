@@ -280,6 +280,15 @@ export async function buildTrack(
     raster = await sources.raster(proj, plan.samples.map((s) => s.pos), reach);
     if (raster) {
       trace = traceRoad(plan, raster);
+      if (opts.noTrace.length) {
+        const zones = opts.noTrace.map((z) => ({ c: proj.toLocal(z.at), r: z.radius }));
+        plan.samples.forEach((smp, i) => {
+          // 1 inside a zone, fading to 0 over 30 m outside it.
+          const keep = Math.min(1, ...zones.map((z) => Math.max(0, Math.min(1, (Math.hypot(smp.pos[0] - z.c[0], smp.pos[1] - z.c[1]) - z.r) / 30))));
+          trace!.offset[i] *= keep;
+          trace!.conf[i] *= keep;
+        });
+      }
       applyTrace(plan, trace, (i) => !!inRoundabout(plan, plan.samples[i].pos[0], plan.samples[i].pos[1], 0.5));
     }
   }

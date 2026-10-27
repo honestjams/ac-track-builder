@@ -20,6 +20,13 @@ export interface BuildOptions {
   corridor: number;
   /** Terrain grid spacing, metres. */
   terrainStep: number;
+  /**
+   * How far the terrain under the road and verges is dropped below them, metres,
+   * so it never pokes through. On a coarse grid the drop drags the ground
+   * beside the road down with it (a ditch at the edge); on flat ground use a
+   * finer terrainStep and a small drop.
+   */
+  terrainUnderRoad: number;
   /** Distance over which terrain blends from the road level to the real ground, metres. */
   terrainBlend: number;
   /** Terrain / texture chunk size, metres. */
@@ -80,6 +87,12 @@ export interface BuildOptions {
   landmarks: boolean;
   /** Move the road to where the aerial photos show it, at their width. */
   traceRoads: boolean;
+  /**
+   * Places where the photo trace is ignored and the road keeps the OSM line
+   * (wide main streets with angled parking can pull the trace onto the
+   * parking bays): centre [lng, lat] and radius in metres. Fades out over 30 m.
+   */
+  noTrace: { at: [number, number]; radius: number }[];
   /** Kerb and gutter where the photos (or a built-up area) show them, instead of a gravel verge. */
   kerbs: boolean;
 }
@@ -94,6 +107,7 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   vergeWidth: 1.5,
   corridor: 90,
   terrainStep: 3,
+  terrainUnderRoad: 0.6,
   terrainBlend: 20,
   chunkSize: 200,
   wallOffset: 10,
@@ -121,6 +135,7 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   streetSigns: true,
   landmarks: true,
   traceRoads: true,
+  noTrace: [],
   kerbs: true,
 };
 
