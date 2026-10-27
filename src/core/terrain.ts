@@ -20,7 +20,6 @@ export interface TerrainChunk {
   maxY: number;
 }
 
-const UNDER_ROAD = 0.6;
 const BELOW_VERGE = 0.25;
 
 export function planTerrainChunks(plan: RoadPlan, index: SegmentIndex, opts: BuildOptions): TerrainChunk[] {
@@ -62,7 +61,7 @@ export function makeTerrainFn(plan: RoadPlan, index: SegmentIndex, dem: HeightFn
       const d = Math.hypot(x - rb.c[0], y - rb.c[1]);
       const edge = outerRadius(rb) + opts.vergeWidth;
       if (d > edge + opts.terrainBlend) continue;
-      if (d <= edge) return { h: ringHeight(rb, Math.min(d, outerRadius(rb))) - UNDER_ROAD, dist: Math.min(fromRoad.dist, 0) };
+      if (d <= edge) return { h: ringHeight(rb, Math.min(d, outerRadius(rb))) - opts.terrainUnderRoad, dist: Math.min(fromRoad.dist, 0) };
       if (fromRoad.dist <= fromRoad.inner) return fromRoad;
       const base = ringHeight(rb, outerRadius(rb)) - BELOW_VERGE + (rb.kerbed ? BELOW_VERGE + KERB_H - 0.03 : 0);
       const f = smoothstep((d - edge) / opts.terrainBlend);
@@ -87,7 +86,7 @@ function roadTerrain(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: B
     const tc = Math.max(-half, Math.min(half, n.t));
     const edge = v.h + v.bank * tc - opts.crown * Math.abs(tc);
     const beyondEnd = !plan.closed && ((n.seg === 0 && n.frac === 0) || (n.seg === lastSeg && n.frac === 1));
-    if (!beyondEnd && n.dist <= inner) return { h: edge - UNDER_ROAD, dist: n.dist, inner };
+    if (!beyondEnd && n.dist <= inner) return { h: edge - opts.terrainUnderRoad, dist: n.dist, inner };
     const base = edge - BELOW_VERGE + (BELOW_VERGE + KERB_H - 0.03) * v.kerb;
     const f = smoothstep((n.dist - inner) / opts.terrainBlend);
     return { h: base + (ground - base) * f, dist: n.dist, inner };
