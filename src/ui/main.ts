@@ -6,7 +6,7 @@ import { buildTrack, type TrackResult } from "../core/track";
 import { zipTrack } from "../core/zip";
 import type { BuildOptions } from "../core/options";
 import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
-import { DEM_CREDIT, DEM_LABEL, IMAGERY, imageryChain, loadChunkImagery, loadDem, type DemSource, type ImagerySource } from "../services/tiles";
+import { DEM_CREDIT, DEM_LABEL, IMAGERY, imageryChain, loadChunkImagery, loadDem, tileUrl, type DemSource, type ImagerySource } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
 import { renderArt } from "../services/art";
 import { loadRouteRaster } from "../services/raster";
@@ -29,12 +29,25 @@ const aerial = L.tileLayer(IMAGERY.esri.template, {
   attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
 });
 street.addTo(map);
-const stateLayer = (src: ImagerySource) => L.tileLayer(IMAGERY[src].template, { maxZoom: 21, maxNativeZoom: IMAGERY[src].maxZoom, attribution: IMAGERY[src].label });
+// Built from tileUrl() so sources asked for by box ({bbox}, e.g. Landgate's ImageServer) work too.
+const BoxTiles = L.TileLayer.extend({
+  getTileUrl(this: L.TileLayer & { _src: ImagerySource }, c: L.Coords) {
+    return tileUrl(this._src, c.z, c.x, c.y);
+  },
+});
+const stateLayer = (src: ImagerySource) => {
+  const layer = new (BoxTiles as unknown as new (url: string, o: L.TileLayerOptions) => L.TileLayer)("", {
+    maxZoom: 21, maxNativeZoom: IMAGERY[src].maxZoom, attribution: IMAGERY[src].label,
+  });
+  (layer as L.TileLayer & { _src: ImagerySource })._src = src;
+  return layer;
+};
 L.control.layers({
   Street: street,
   "Aerial (Esri)": aerial,
   "Aerial (Queensland)": stateLayer("qld"),
   "Aerial (NSW)": stateLayer("nsw"),
+  "Aerial (WA)": stateLayer("wa"),
 }, undefined, { position: "topright" }).addTo(map);
 
 // Open near the visitor's region, guessed from the time zone (no location prompt).
