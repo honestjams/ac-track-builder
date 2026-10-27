@@ -493,6 +493,13 @@ export async function buildTrack(
       rb.kerbed = plan.samples.some((s, i) => (kerbs[0][i] || kerbs[1][i]) && Math.hypot(s.pos[0] - rb.c[0], s.pos[1] - rb.c[1]) < reach);
     }
   }
+  // Record the kerbs on the samples too: the terrain reads them (SegmentIndex.at),
+  // so the ground behind a kerb starts at nature strip height. Without this it
+  // started BELOW_VERGE under the road edge, leaving a step of about 40 cm
+  // between the back of the nature strip and the ground.
+  plan.samples.forEach((smp, i) => {
+    if (kerbs[0][i] > 0 || kerbs[1][i] > 0) smp.kerb = [kerbs[0][i], kerbs[1][i]];
+  });
   const kerbAt = (i: number, side: 1 | -1) => kerbs[side === 1 ? 0 : 1][((i % nS) + nS) % nS] > 0;
   // The gravel verge gives way to the kerb's nature strip, which also covers the slopes where kerbs start and end.
   const roadMeshes = buildRoadMeshes(plan, opts, chunkMaterial, (i, side) => mouth(side, plan.samples[i % nS].s) || kerbAt(i, side));
