@@ -29,12 +29,34 @@ export const IMAGERY = {
     credit: "NSW Spatial Services imagery ((c) Department of Customer Service NSW)",
     maxZoom: 21,
   },
+  wa: {
+    // Landgate's free Locate mosaic. An ImageServer with no tile cache, so each
+    // web map tile is asked for by its Web Mercator box ({bbox}).
+    label: "Landgate WA (Locate)",
+    template: "https://services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Locate/ImageServer/exportImage"
+      + "?bbox={bbox}&bboxSR=3857&imageSR=3857&size=256,256&format=jpg&interpolation=RSP_BilinearInterpolation&f=image",
+    credit: "Locate mosaic (c) Western Australian Land Information Authority (Landgate), personal use",
+    maxZoom: 20,
+  },
 } as const;
 
 export type ImagerySource = keyof typeof IMAGERY;
 
+const WORLD_M = 40075016.68557849;
+
+/** A web map tile's Web Mercator box as "xmin,ymin,xmax,ymax". */
+export function tileBbox(z: number, x: number, y: number): string {
+  const size = WORLD_M / 2 ** z;
+  const x0 = x * size - WORLD_M / 2, y1 = WORLD_M / 2 - y * size;
+  return [x0, y1 - size, x0 + size, y1].map((v) => v.toFixed(3)).join(",");
+}
+
 export const tileUrl = (src: ImagerySource, z: number, x: number, y: number) =>
-  IMAGERY[src].template.replace("{z}", String(z)).replace("{y}", String(y)).replace("{x}", String(x));
+  IMAGERY[src].template
+    .replace("{z}", String(z))
+    .replace("{y}", String(y))
+    .replace("{x}", String(x))
+    .replace("{bbox}", () => tileBbox(z, x, y));
 
 /**
  * Sources to try, best first, for a place. The state services are much
@@ -77,6 +99,7 @@ export function imageryChain(at: LngLat, pick: "auto" | ImagerySource = "auto"):
   const chain: ImagerySource[] = [];
   if (lat > -29.3 && lat < -9 && lng > 137.9 && lng < 154) chain.push("qld");
   if (lat < -28.1 && lat > -37.6 && lng > 140.9 && lng < 154) chain.push("nsw");
+  if (lat < -13.5 && lat > -35.4 && lng > 112.8 && lng < 129.1) chain.push("wa");
   return [...chain, "esri"];
 }
 
