@@ -659,7 +659,7 @@ export async function buildTrack(
   }
   // Painted marks street-level imagery located: snapped to the road at their distance along it.
   const discreteMarks = (): DiscreteMark[] => (sources.seen ?? []).flatMap((f): DiscreteMark[] => {
-    const m = /^marking--discrete--(stop-line|give-way|crosswalk-zebra|arrow--([a-z-]+)|text--([a-z0-9-]+))/.exec(f.value);
+    const m = /^marking--discrete--(stop-line|give-way|crosswalk-zebra|arrow--([a-z-]+)|text--([a-z0-9-]+)|symbol--(bicycle))/.exec(f.value);
     if (!m) return [];
     const p = proj.toLocal(f.at);
     const n = index.nearest(p[0], p[1], 15);
@@ -668,10 +668,11 @@ export async function buildTrack(
     const at = { s: plan.samples[n.seg].s + n.frac * opts.spacing, t: n.t };
     if (m[2]) return [{ ...at, kind: "arrow", shape: m[2] }];
     if (m[3]) return [{ ...at, kind: "text", shape: m[3] }];
+    if (m[4]) return [{ ...at, kind: "symbol", shape: m[4] }];
     return [{ ...at, kind: m[1] === "stop-line" ? "stop" : m[1] === "give-way" ? "giveway" : "zebra" }];
   }).filter((d, i, all) => !all.slice(0, i).some((e) => e.kind === d.kind && Math.abs(e.s - d.s) < 8
     // Arrows and numbers: one per lane.
-    && (!/^(arrow|text)$/.test(d.kind) || Math.sign(e.t) === Math.sign(d.t) && Math.abs(e.t - d.t) < 1.6)));
+    && (!/^(arrow|text|symbol)$/.test(d.kind) || Math.sign(e.t) === Math.sign(d.t) && Math.abs(e.t - d.t) < 1.6)));
   const markings = opts.markings
     ? buildMarkings(plan, opts, (sd) => {
       const p = sampleNear(sd).pos;

@@ -14,7 +14,7 @@ const LAYERS = [
 ];
 
 /** Only the kinds the build knows how to place. */
-const WANTED = /^(object--support--utility-pole|object--street-light|object--traffic-light|regulatory--|warning--|complementary--chevron|marking--discrete--(stop-line|crosswalk-zebra|give-way|arrow--|text--))/;
+const WANTED = /^(object--support--utility-pole|object--street-light|object--traffic-light|regulatory--|warning--|complementary--chevron|marking--discrete--(stop-line|crosswalk-zebra|give-way|arrow--|text--|symbol--bicycle))/;
 
 const TOKEN_KEY = "mapillary_token";
 

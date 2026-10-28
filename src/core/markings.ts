@@ -354,7 +354,7 @@ export function buildMarkings(
       // Zebra: 0.5 m bars across the whole road, 1 m apart, 3 m deep.
       for (let t = -half; t < half - 0.4; t += 1) patch(d.s - 1.5, d.s + 1.5, t, t + 0.5);
     } else {
-      const g = d.kind === "arrow" ? arrowGlyph(d.shape) : textGlyph(d.shape);
+      const g = d.kind === "arrow" ? arrowGlyph(d.shape) : d.kind === "symbol" ? symbolGlyph(d.shape) : textGlyph(d.shape);
       if (!g) continue;
       // Centred on where it was seen, kept on the road; the tail is where its traffic meets it first.
       const s0 = Math.max(1, Math.min(end - 1 - g.length, d.s - g.length / 2));
@@ -383,8 +383,8 @@ export function buildMarkings(
 export interface DiscreteMark {
   s: number;
   t: number;
-  kind: "stop" | "giveway" | "zebra" | "arrow" | "text" | "start" | "finish";
-  /** Arrow: left, right, straight, split-left-or-straight, ...; text: the characters. */
+  kind: "stop" | "giveway" | "zebra" | "arrow" | "text" | "symbol" | "start" | "finish";
+  /** Arrow: left, right, straight, split-left-or-straight, ...; text: the characters; symbol: bicycle. */
   shape?: string;
 }
 
@@ -500,6 +500,31 @@ export function textGlyph(text = ""): Glyph | null {
     });
   });
   return { lines, heads: [], width: narrowest < 0.5 ? 0.12 : 0.18, length: H * words.length + rowGap * (words.length - 1) };
+}
+
+/**
+ * Painted symbols. A bicycle: drawn side-on, standing up the lane for the
+ * approaching driver (its height along the road, stretched like road text),
+ * about 1.3 m across and 2 m long.
+ */
+export function symbolGlyph(shape = ""): Glyph | null {
+  if (shape !== "bicycle") return null;
+  // Bike space: x across the bike (rear -, front +), y up; mapped to a = along, c = across.
+  const map = ([x, y]: [number, number]): [number, number] => [y * 1.6, -x * 0.62];
+  const wheel = (cx: number): [number, number][] =>
+    Array.from({ length: 17 }, (_, k) => map([cx + Math.cos((k / 16) * Math.PI * 2) * 0.38, 0.38 + Math.sin((k / 16) * Math.PI * 2) * 0.38]));
+  const rear: [number, number] = [-0.62, 0.38], front: [number, number] = [0.62, 0.38], crank: [number, number] = [0, 0.38];
+  const seat: [number, number] = [-0.18, 0.95], head: [number, number] = [0.48, 1.0];
+  const lines: [number, number][][] = [
+    wheel(-0.62),
+    wheel(0.62),
+    [rear, crank, seat, rear].map(map),
+    [seat, head, crank].map(map),
+    [head, front].map(map),
+    [[-0.32, 1.0], [-0.04, 1.0]].map((p) => map(p as [number, number])), // saddle
+    [head, [0.36, 1.14]].map((p) => map(p as [number, number])), // handlebar
+  ];
+  return { lines, heads: [], width: 0.08, length: Math.max(...lines.flat().map((p) => p[0])) };
 }
 
 /** A 100 x 100 x 20 mm marker on the centreline. */
