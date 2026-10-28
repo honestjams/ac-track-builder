@@ -196,3 +196,64 @@ export function roadClassLookup(roads: TileRoad[], lat: number): (p: LngLat) => 
     return best;
   };
 }
+
+/** A polygon from the tiles: exterior ring first, then holes. `edge[r][i]` is false where ring r's edge i is only a tile seam. */
+export interface TilePolygon {
+  rings: LngLat[][];
+  edge: boolean[][];
+}
+
+/**
+ * The sea (water layer, class ocean) and piers and jetties (transportation,
+ * class pier, as areas) from z13 tiles over [west, south, east, north].
+ * Polygons are clipped to their tiles so neighbouring tiles meet without overlap.
+ */
+export async function fetchCoast(bbox: [number, number, number, number]): Promise<{ ocean: TilePolygon[]; piers: TilePolygon[]; beaches: TilePolygon[] }> {
+  const url = await tileTemplate();
+  const z = 13;
+  const [w, s, e, n] = bbox;
+  const a = lngLatToPixel([w, n], z), b = lngLatToPixel([e, s], z);
+  const x0 = Math.floor(a[0] / 256), x1 = Math.floor(b[0] / 256), y0 = Math.floor(a[1] / 256), y1 = Math.floor(b[1] / 256);
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) > 100) throw new Error("Area too large for coast tiles");
+  const ocean: TilePolygon[] = [];
+  const piers: TilePolygon[] = [];
+  const beaches: TilePolygon[] = [];
+  const jobs: Promise<void>[] = [];
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      jobs.push((async () => {
+        const r = await fetch(url.replace("{z}", String(z)).replace("{x}", String(tx)).replace("{y}", String(ty)));
+        if (!r.ok) return;
+        const tile = new VectorTile(new PbfReader(new Uint8Array(await r.arrayBuffer())));
+        const take = (layer: string, want: (p: Record<string, unknown>) => boolean, out: TilePolygon[]) => {
+          const l = tile.layers[layer];
+          for (let i = 0; l && i < l.length; i++) {
+            const f = l.feature(i);
+            if (f.type !== 3 || !want(f.properties)) continue;
+            const ext = l.extent;
+            let poly: TilePolygon | null = null;
+            for (const ring of f.loadGeometry()) {
+              const clipped = clipToTile(ring.slice(0, -1), ext);
+              if (clipped.length < 3) continue;
+              const onSeam = (p: P, q: P) => (p.x <= 0 && q.x <= 0) || (p.x >= ext && q.x >= ext) || (p.y <= 0 && q.y <= 0) || (p.y >= ext && q.y >= ext);
+              const edge = clipped.map((p, k) => !onSeam(p, clipped[(k + 1) % clipped.length]));
+              const ll = clipped.map((p) => pixelToLngLat([(tx + p.x / ext) * 256, (ty + p.y / ext) * 256], z));
+              if (signedArea(ring) > 0) {
+                poly = { rings: [ll], edge: [edge] };
+                out.push(poly);
+              } else if (poly) {
+                poly.rings.push(ll);
+                poly.edge.push(edge);
+              }
+            }
+          }
+        };
+        take("water", (p) => p.class === "ocean", ocean);
+        take("transportation", (p) => p.class === "pier", piers);
+        take("landcover", (p) => p.class === "sand" && (p.subclass === "beach" || p.subclass === undefined), beaches);
+      })().catch(() => undefined));
+    }
+  }
+  await Promise.all(jobs);
+  return { ocean, piers, beaches };
+}

@@ -5,7 +5,7 @@
 import { encodeDdsDxt1 } from "./dds";
 import { encodePng } from "./png";
 
-function rng(seed: number): () => number {
+export function rng(seed: number): () => number {
   let s = seed >>> 0;
   return () => {
     s = (s + 0x6d2b79f5) >>> 0;
@@ -36,7 +36,7 @@ function valueNoise(w: number, h: number, cells: number, seed: number): Float32A
   return out;
 }
 
-function fill(w: number, h: number, shade: (x: number, y: number, i: number) => [number, number, number]): Uint8Array {
+export function fill(w: number, h: number, shade: (x: number, y: number, i: number) => [number, number, number]): Uint8Array {
   const px = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {

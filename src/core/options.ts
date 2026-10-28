@@ -99,6 +99,8 @@ export interface BuildOptions {
    * and grass on the aerial photo's lawns, sharp up close.
    */
   detailShaders: boolean;
+  /** Water surface over the sea, piers and jetties, and a rock seawall and groynes on the coast. */
+  sea: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -142,6 +144,7 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   noTrace: [],
   kerbs: true,
   detailShaders: true,
+  sea: true,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {
