@@ -18,7 +18,13 @@ export function slugify(name: string): string {
  * Physics surfaces. Mesh names starting with a digit and one of these keys
  * (1ROAD_000, 1GRASS_t004, 1WALL_L_000) become drivable/collidable.
  */
-export function surfacesIni(): string {
+/**
+ * `traffic` turns on CSP's extended track physics and lets scripts drive
+ * traffic cars (what CSP's traffic planner needs). The track then won't pass
+ * an online server's integrity check against the original files, but LAN
+ * between machines with the same build is fine.
+ */
+export function surfacesIni(traffic = false): string {
   const surfaces = [
     { KEY: "ROAD", FRICTION: 0.99, DAMPING: 0, WAV: "", WAV_PITCH: 0, FF_EFFECT: "NULL", DIRT_ADDITIVE: 0, IS_VALID_TRACK: 1, BLACK_FLAG_TIME: 0, SIN_HEIGHT: 0, SIN_LENGTH: 0, IS_PITLANE: 0, VIBRATION_GAIN: 0, VIBRATION_LENGTH: 0 },
     // Streets that aren't the route: asphalt underfoot, but leaving the route for one invalidates the run.
@@ -28,9 +34,10 @@ export function surfacesIni(): string {
     { KEY: "KERB", FRICTION: 0.92, DAMPING: 0, WAV: "", WAV_PITCH: 0, FF_EFFECT: "NULL", DIRT_ADDITIVE: 0, IS_VALID_TRACK: 1, BLACK_FLAG_TIME: 0, SIN_HEIGHT: 0, SIN_LENGTH: 0, IS_PITLANE: 0, VIBRATION_GAIN: 0.3, VIBRATION_LENGTH: 0.2 },
     { KEY: "WALL", FRICTION: 0.3, DAMPING: 0, WAV: "", WAV_PITCH: 0, FF_EFFECT: "NULL", DIRT_ADDITIVE: 0, IS_VALID_TRACK: 0, BLACK_FLAG_TIME: 0, SIN_HEIGHT: 0, SIN_LENGTH: 0, IS_PITLANE: 0, VIBRATION_GAIN: 0, VIBRATION_LENGTH: 0 },
   ];
+  if (traffic) (surfaces[0] as Record<string, unknown>).WAV_PITCH = "extended-0";
   return surfaces
     .map((s, i) => `[SURFACE_${i}]\n` + Object.entries(s).map(([k, v]) => `${k}=${v}`).join("\n"))
-    .join("\n\n") + "\n";
+    .join("\n\n") + "\n" + (traffic ? "\n[_SCRIPTING_PHYSICS]\nALLOW_TOOLS=1\nALLOW_TRACK_SCRIPTS=1\n" : "");
 }
 
 function geotag(lngLat: LngLat): [string, string] {

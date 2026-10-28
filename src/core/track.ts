@@ -15,6 +15,7 @@ import { simplify } from "./polyline";
 import { applyElevation, inRoundabout, isLoop, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
 import { extendRoute, pathLength } from "./extend";
 import { keepOffRoute, onRoute } from "./clearance";
+import { trafficJson, type TrafficRoad } from "./traffic";
 import { buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
 import { buildKerbReturns, buildKerbs, KERB_BACK, KERB_H, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
@@ -922,6 +923,62 @@ export async function buildTrack(
     ]),
   };
 
+  // Traffic for CSP's traffic planner, on the roads the track has: the route
+  // (split where it changes between two and four lanes) and the side streets.
+  const trafficData = () => {
+    const routeRoads: TrafficRoad[] = [];
+    const wide = plan.samples.map((smp) => smp.width >= 12);
+    // Smooth out short changes, under 60 m.
+    const span = Math.round(30 / opts.spacing);
+    const wideAt = (i: number) => {
+      let n = 0, m = 0;
+      for (let k = -span; k <= span; k++) {
+        const j = plan.closed ? (i + k + nS) % nS : i + k;
+        if (j < 0 || j >= nS) continue;
+        m++;
+        if (wide[j]) n++;
+      }
+      return n * 2 > m;
+    };
+    const speedAt = (i: number) => {
+      const cls = sources.roadClassAt?.(proj.toLngLat(plan.samples[i].pos)) ?? "";
+      if (/^(motorway|trunk)/.test(cls)) return town[i] ? 70 : 100;
+      if (/^primary/.test(cls)) return town[i] ? 60 : 90;
+      return town[i] >= 1 ? 50 : 80;
+    };
+    let run: number[] = [];
+    const flush = () => {
+      if (run.length >= 2) {
+        const ws = run.map((i) => plan.samples[i].width).sort((a, b) => a - b);
+        const speeds = run.map(speedAt).sort((a, b) => a - b);
+        routeRoads.push({
+          pts: run.map((i) => plan.samples[i].pos), h: run.map((i) => plan.samples[i].h),
+          width: ws[ws.length >> 1], speed: speeds[speeds.length >> 1],
+        });
+      }
+    };
+    for (let i = 0; i < nS; i++) {
+      if (run.length && wideAt(i) !== wideAt(run[run.length - 1])) {
+        flush();
+        run = [run[run.length - 1]];
+      }
+      run.push(i);
+    }
+    flush();
+    if (plan.closed && routeRoads.length === 1) routeRoads[0].closed = true;
+    else if (plan.closed && routeRoads.length > 1) {
+      // The last run carries on into the first.
+      const last = routeRoads.pop()!, first = routeRoads[0];
+      routeRoads[0] = { ...first, pts: [...last.pts, ...first.pts.slice(1)], h: [...last.h, ...first.h.slice(1)] };
+    }
+    const streetRoads: TrafficRoad[] = streetPlan.streets.map((st) => ({
+      pts: st.pts, h: st.pts.map(([x, y]) => terrainAt(x, y).h + 0.1), width: st.width, speed: 50,
+    }));
+    return trafficJson([...routeRoads, ...streetRoads], plan.roundabouts.map((rb) => ({
+      c: rb.c, h: rb.hc, rIn: innerRadius(rb), rOut: outerRadius(rb),
+    })));
+  };
+
   await progress("Writing track files");
   const kn5 = writeKn5(model);
   const ai = writeFastLaneAi(buildAiLine(plan));
@@ -934,7 +991,8 @@ export async function buildTrack(
   const files: Record<string, Uint8Array> = {
     [`${slug}/${slug}.kn5`]: kn5,
     [`${slug}/ai/fast_lane.ai`]: ai,
-    [`${slug}/data/surfaces.ini`]: enc.encode(surfacesIni()),
+    [`${slug}/data/surfaces.ini`]: enc.encode(surfacesIni(opts.traffic)),
+    ...(opts.traffic ? { [`${slug}/data/traffic.json`]: enc.encode(trafficData()) } : {}),
     [`${slug}/data/map.ini`]: enc.encode(map.ini),
     [`${slug}/data/cameras_1.ini`]: enc.encode(camerasIni(cameras)),
     [`${slug}/extension/ext_config.ini`]: enc.encode(extConfig(utilities.lights, {
