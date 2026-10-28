@@ -120,19 +120,23 @@ function encodeAlphaBlock(px: Uint8Array | Uint8ClampedArray, w: number, h: numb
   out.u8(hi).u8(lo);
   // Palette for a0 > a1: a0, a1, then six steps between.
   const pal = [hi, lo, ...[1, 2, 3, 4, 5, 6].map((k) => ((7 - k) * hi + k * lo) / 7)];
-  let bits = 0n;
-  for (let i = 15; i >= 0; i--) {
-    let best = 0;
-    if (hi !== lo) {
-      let bd = Infinity;
+  // 16 three-bit indices, pixel 0 in the lowest bits: two 24-bit halves of 8 pixels each.
+  const idx = new Array<number>(16).fill(0);
+  if (hi !== lo) {
+    for (let i = 0; i < 16; i++) {
+      let best = 0, bd = Infinity;
       for (let p = 0; p < 8; p++) {
         const d = Math.abs(a[i] - pal[p]);
         if (d < bd) [bd, best] = [d, p];
       }
+      idx[i] = best;
     }
-    bits = (bits << 3n) | BigInt(best);
   }
-  for (let k = 0; k < 6; k++) out.u8(Number((bits >> BigInt(k * 8)) & 0xffn));
+  for (const half of [0, 8]) {
+    let bits = 0;
+    for (let i = 7; i >= 0; i--) bits = bits * 8 + idx[half + i];
+    out.u8(bits & 255).u8((bits >> 8) & 255).u8((bits >> 16) & 255);
+  }
 }
 
 /** RGBA pixels (top row first) -> DXT5 .dds bytes with mipmaps: colour like DXT1, plus a smooth alpha channel. */

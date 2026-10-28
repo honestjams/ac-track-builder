@@ -22,3 +22,20 @@ describe("DXT5", async () => {
     expect(dds.length).toBe(128 + 16 * 4 + 16 * 3);
   });
 });
+
+describe("DXT5 alpha indices", async () => {
+  const { encodeDdsDxt5 } = await import("../src/core/dds");
+  it("decodes back to the source alpha across a gradient", () => {
+    const W = 4, H = 4;
+    const px = new Uint8Array(W * H * 4);
+    for (let i = 0; i < 16; i++) px[i * 4 + 3] = Math.round((i / 15) * 255);
+    const dds = encodeDdsDxt5(px, W, H);
+    const a0 = dds[128], a1 = dds[129];
+    const pal = [a0, a1, ...[1, 2, 3, 4, 5, 6].map((k) => ((7 - k) * a0 + k * a1) / 7)];
+    const lo = dds[130] | (dds[131] << 8) | (dds[132] << 16), hi = dds[133] | (dds[134] << 8) | (dds[135] << 16);
+    for (let i = 0; i < 16; i++) {
+      const bits = i < 8 ? (lo >> (3 * i)) & 7 : (hi >> (3 * (i - 8))) & 7;
+      expect(Math.abs(pal[bits] - px[i * 4 + 3])).toBeLessThanOrEqual(19);
+    }
+  });
+});
