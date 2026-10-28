@@ -17,7 +17,7 @@ import { extendRoute, pathLength } from "./extend";
 import { keepOffRoute, onRoute } from "./clearance";
 import { buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
-import { buildKerbReturns, buildKerbs, KERB_BACK, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
+import { buildKerbReturns, buildKerbs, KERB_BACK, KERB_H, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
 import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1 } from "./dds";
 import { buildMarkings, type DiscreteMark } from "./markings";
@@ -33,6 +33,7 @@ import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, gateSigns, landmarks, mergeSightings, seenFeatures, streetSigns } from "./furniture";
 import { placeUtilities } from "./utilities";
+import { buildVergeConcrete, readVerge } from "./footpaths";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, displayOf, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, streetSurface, type StreetLine, type StreetName } from "./sideStreets";
@@ -126,6 +127,9 @@ export interface TrackResult {
     /** Power poles and street lights placed. */
     poles: number;
     streetLights: number;
+    /** Footpath read off the photo, metres (both sides), and driveway crossovers. */
+    footpathMetres: number;
+    driveways: number;
     streetSigns: number;
     signs: number;
     railMetres: number;
@@ -601,6 +605,12 @@ export async function buildTrack(
     materials.push(material("returns_photo", "returns_photo.dds", { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
   }
   const kerbMeshes = buildKerbs(plan, opts, kerbs, stripMaterial, returns?.noRamp);
+  // Footpaths and driveway crossovers in the nature strip, where the photo shows them.
+  const stripOuter = opts.vergeWidth + STRIP_EXTRA;
+  const verge = opts.kerbs && raster ? readVerge(plan, raster, kerbs, stripOuter, (x, y) => streetIndex.clearance(x, y) < 0.5) : null;
+  const vergeConcrete = verge
+    ? buildVergeConcrete(plan, verge, (x, y, d, smp, side) => (d <= stripOuter ? surfaceHeight(smp, (side * smp.width) / 2, opts.crown) + KERB_H : terrainAt(x, y).h))
+    : [];
   // Photo surface on the traced side streets too (the nearest 40, to keep the file in check).
   const photoStreets = new Set(
     opts.roadSurface === "photo" && raster
@@ -765,7 +775,7 @@ export async function buildTrack(
   // Last check: no kerb, strip, gutter or rail triangle stands on the route's asphalt.
   const onRoad = onRoute(plan, index);
   const meshesOf = (nodes: Kn5Node[]) => nodes.filter((n): n is Kn5MeshNode => n.kind === "mesh");
-  const kerbsClear = keepOffRoute([...kerbMeshes.gutter, ...kerbMeshes.kerb, ...kerbMeshes.strip, ...kerbReturns], onRoad);
+  const kerbsClear = keepOffRoute([...kerbMeshes.gutter, ...kerbMeshes.kerb, ...kerbMeshes.strip, ...kerbReturns, ...vergeConcrete], onRoad);
   const ringsClear = keepOffRoute(meshesOf(ringNodes), onRoad);
   const railsClear = keepOffRoute(rails.rails, onRoad);
   const slug = slugify(opts.name);
@@ -850,6 +860,8 @@ export async function buildTrack(
       sideTraced,
       kerbMetres: (kerbs[0].reduce((a, b) => a + b, 0) + kerbs[1].reduce((a, b) => a + b, 0)) * opts.spacing,
       poles: utilities.poles,
+      footpathMetres: verge ? (verge.paths[0].filter(Boolean).length + verge.paths[1].filter(Boolean).length) * opts.spacing : 0,
+      driveways: verge?.drives.length ?? 0,
       streetLights: utilities.lights.length,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,

@@ -9,7 +9,7 @@ import { innerRadius, outerRadius } from "./roundabout";
 import type { RoadPlan, SegmentIndex } from "./road";
 
 /** Meshes that must never stand on the route: kerbs, their strips and gutters, guard rails. */
-export const KEEP_OFF = /^1(KERB|GRASS_STRIP|ROAD_GUTTER|STREET_GUTTER|WALL_RAIL)/;
+export const KEEP_OFF = /^1(KERB|GRASS_STRIP|ROAD_GUTTER|STREET_GUTTER|STREET_PATH|STREET_DRIVE|WALL_RAIL)/;
 
 /** Is this local point (x east, y north) on the route's asphalt or a roundabout's carriageway? */
 export function onRoute(plan: RoadPlan, index: SegmentIndex, margin = 0.15): (x: number, y: number) => boolean {

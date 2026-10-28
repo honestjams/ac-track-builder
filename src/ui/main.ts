@@ -536,6 +536,7 @@ function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<Imag
     ["Traced from photos", `${Math.round(s.traced * 100)}% of the road, ${s.photoLines} lines${s.photoChunks ? `, ${s.photoChunks} photo-surfaced stretches` : ""}`],
     ["Side streets", `${s.sideStreets.toLocaleString()} (${s.sideTraced} traced)`],
     ["Kerb & gutter", `${(s.kerbMetres / 1000).toFixed(2)} km`],
+    ["Footpaths", `${(s.footpathMetres / 1000).toFixed(2)} km, ${s.driveways} driveways`],
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Poles & lights", `${s.poles} power poles, ${s.streetLights} street lights`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
