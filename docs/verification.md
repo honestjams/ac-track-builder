@@ -28,7 +28,7 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 9 | The in-game map (F-key apps / map app) shows the road in the right place | `data/map.ini` offsets and `SCALE_FACTOR` |
 | 10 | AI cars drive the road (Race / Track Day with AI) | `ai/fast_lane.ai`; see note below |
 | 11 | Horizon hills show and there's no visible ledge where they meet the near terrain | `src/core/backdrop.ts` `SINK` |
-| 12 | Performance is fine (FPS similar to a Kunos track) | chunk sizes, texture size, `maxTrees` |
+| 12 | Performance is fine (FPS similar to a Kunos track); markings, signs and posts fade out in the distance without popping in close | chunk sizes, texture size, `maxTrees`; tiles and draw distances in `cull.ts` |
 | 13 | Trees show cut-out foliage (not solid rectangles), lit on both sides | `trees` material: `ksPerPixelAT`, alpha-tested |
 | 14 | Guard rails stop the car and sit on the verge, not floating or buried | `1WALL_RAIL_*`, `buildGuardRails` |
 | 15 | Buildings stand on the ground and are solid | `1WALL_BLD_*`, `buildBuildings` |

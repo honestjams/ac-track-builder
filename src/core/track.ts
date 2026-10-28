@@ -28,6 +28,7 @@ import {
 } from "./scenery";
 import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, pointInRing, type Building } from "./buildings";
 import { camerasIni, placeCameras } from "./cameras";
+import { cullable } from "./cull";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, gateSigns, landmarks, seenFeatures, streetSigns } from "./furniture";
@@ -753,21 +754,25 @@ export async function buildTrack(
   const model: Kn5Model = {
     textures,
     materials,
+    // Wide meshes split into tiles and small detail given a draw distance, so the game can skip what's out of sight.
     root: group(slug, [
-      group("ROAD", roadMeshes.road),
-      group("SIDESTREETS", sideStreets),
-      group("FURNITURE", furniture),
-      group("ROUNDABOUTS", [...ringsClear.nodes, ...shrubs, ...ringWalls]),
-      group("MARKINGS", markings),
-      group("VERGE", roadMeshes.verge),
-      group("KERBS", kerbsClear.nodes),
+      ...cullable([
+        group("ROAD", roadMeshes.road),
+        group("SIDESTREETS", sideStreets),
+        group("FURNITURE", furniture),
+        group("ROUNDABOUTS", [...ringsClear.nodes, ...shrubs, ...ringWalls]),
+        group("MARKINGS", markings),
+        group("VERGE", roadMeshes.verge),
+        group("KERBS", kerbsClear.nodes),
+        group("TREES", trees),
+        group("RAILS", [...railsClear.nodes, ...rails.posts]),
+        group("GUIDEPOSTS", posts),
+        group("BUILDINGS", houses),
+      ]),
+      // Already in compact chunks (terrain, horizon), or never drawn (walls).
       group("TERRAIN", terrainNodes),
       group("WALLS", walls),
       group("HORIZON", backdropNodes),
-      group("TREES", trees),
-      group("RAILS", [...railsClear.nodes, ...rails.posts]),
-      group("GUIDEPOSTS", posts),
-      group("BUILDINGS", houses),
       ...trackObjects(plan, opts),
     ]),
   };

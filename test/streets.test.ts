@@ -101,16 +101,22 @@ describe("side streets, signs and furniture", async () => {
     for (const k of ["bus", "stop", "speed:60", "back"]) expect(kinds).toContain(k);
     expect(kinds.some((k) => k.startsWith("poi:fuel:Ampol"))).toBe(true);
     expect(kinds.some((k) => k.startsWith("poi:cafe:Bean There"))).toBe(true);
+    // Wide meshes are split into tiles (…_000_T0, …_000_T1), so match the start of the name.
     const names = all.map((m) => m.name);
-    for (const m of ["FURNITURE_CANOPY_000", "FURNITURE_TIMBER_000", "FURNITURE_LAMP_000", "FURNITURE_SIGNART_000"]) expect(names).toContain(m);
+    for (const m of ["FURNITURE_CANOPY_000", "FURNITURE_TIMBER_000", "FURNITURE_LAMP_000", "FURNITURE_SIGNART_000"]) {
+      expect(names.some((n) => n === m || n.startsWith(`${m}_T`))).toBe(true);
+    }
   });
 
   it("pushes objects that land on the road back onto the verge", () => {
-    const lamp = all.find((m) => m.name === "FURNITURE_STEEL_000")!;
-    for (let i = 0; i < lamp.positions.length; i += 3) {
-      const x = lamp.positions[i], n = -lamp.positions[i + 2];
-      // the street light post near x = 160 must not stand on the 7 m road
-      if (Math.abs(x - 160) < 0.2 && lamp.positions[i + 1] < 45) expect(Math.abs(n)).toBeGreaterThan(3.5);
+    const steel = all.filter((m) => m.name.startsWith("FURNITURE_STEEL_"));
+    expect(steel.length).toBeGreaterThan(0);
+    for (const lamp of steel) {
+      for (let i = 0; i < lamp.positions.length; i += 3) {
+        const x = lamp.positions[i], n = -lamp.positions[i + 2];
+        // the street light post near x = 160 must not stand on the 7 m road
+        if (Math.abs(x - 160) < 0.2 && lamp.positions[i + 1] < 45) expect(Math.abs(n)).toBeGreaterThan(3.5);
+      }
     }
   });
 });
