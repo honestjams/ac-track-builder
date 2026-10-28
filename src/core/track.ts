@@ -22,13 +22,14 @@ import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1 } from "./dds";
 import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { BARRIERS, barrierTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
   buildGuardRails, buildGuidePosts, buildTrees, treeTrunks, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
 import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, pointInRing, type Building } from "./buildings";
 import { camerasIni, placeCameras } from "./cameras";
 import { cullable } from "./cull";
+import { buildBarriers } from "./fences";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, gateSigns, landmarks, mergeSightings, seenFeatures, streetSigns } from "./furniture";
@@ -81,6 +82,8 @@ export interface OsmFeatures {
   guardRails: LngLat[][];
   /** OSM junction=roundabout ways near the route. */
   roundaboutRings?: LngLat[][];
+  /** Fences, walls and hedges near the route (OSM barrier=*). */
+  barriers?: { pts: LngLat[]; kind: "fence" | "wall" | "hedge" | "retaining_wall"; fenceType?: string; material?: string; height?: number }[];
   /** Power poles, street lamps and distribution power lines (on poles) near the route. */
   poles?: LngLat[];
   lamps?: LngLat[];
@@ -347,6 +350,7 @@ export async function buildTrack(
   addScenery("lamp.png", solidTexture([150, 152, 150]), material("lamp", "lamp.png", { ambient: 0.45, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("signal.png", solidTexture([28, 30, 26]), material("signal", "signal.png", { ambient: 0.4, diffuse: 0.4, specular: 0.2, exp: 20 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
+  for (const b of BARRIERS) addScenery(`barrier_${b}.png`, barrierTexture(b), material(`barrier_${b}`, `barrier_${b}.png`, { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 15 }));
   addScenery("door.png", solidTexture([92, 62, 44]), material("door", "door.png", { ambient: 0.45, diffuse: 0.45, specular: 0.15, exp: 15 }));
   addScenery("garage.png", garageTexture(), material("garage", "garage.png", { ambient: 0.45, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("letterbox.png", solidTexture([168, 52, 40]), material("letterbox", "letterbox.png", { ambient: 0.45, diffuse: 0.45, specular: 0.25, exp: 25 }));
@@ -713,6 +717,12 @@ export async function buildTrack(
   const treesKept = offStreets(offRings(filterTrees(treeSpots, index, opts, opts.maxTrees)));
   const trees = buildTrees(treesKept, ground);
   const trunks = treeTrunks(treesKept, ground);
+  // Fences, walls and hedges where OSM maps them, never near the road or across a street.
+  const barriers = buildBarriers(
+    (sources.osm?.barriers ?? []).map((b) => ({ ...b, pts: b.pts.map((p) => proj.toLocal(p)) })),
+    index, opts, ground,
+    (x, y) => streetIndex.clearance(x, y) > 1.5 && !inRoundabout(plan, x, y, opts.vergeWidth + 3),
+  );
   // A tree and a ring of shrubs on each island big enough for them.
   const islandTrees = plan.roundabouts.flatMap((rb) => {
     const ri = innerRadius(rb);
@@ -804,6 +814,7 @@ export async function buildTrack(
         group("RAILS", [...railsClear.nodes, ...rails.posts]),
         group("GUIDEPOSTS", posts),
         group("BUILDINGS", houses),
+        group("FENCES", keepOffRoute(barriers, onRoad).nodes),
       ]),
       // Already in compact chunks (terrain, horizon), or never drawn (walls).
       group("TERRAIN", terrainNodes),

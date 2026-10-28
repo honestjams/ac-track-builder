@@ -164,6 +164,7 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     node(around:40,${around})[power=pole];
     node(around:40,${around})[highway=street_lamp];
     way(around:40,${around})[power~"^(line|minor_line)$"];
+    way(around:45,${around})[barrier~"^(fence|wall|hedge|retaining_wall)$"];
   );out tags geom;`;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 45000);
@@ -181,7 +182,7 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     clearTimeout(timer);
     ctl.abort();
   }
-  const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [], poles: [], lamps: [], powerLines: [] };
+  const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [], poles: [], lamps: [], powerLines: [], barriers: [] };
   if (!elements) return { features };
 
   const ways: Way[] = [];
@@ -197,6 +198,12 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
       if (onPoles(tags)) features.powerLines!.push(pts);
     } else if (tags.junction === "roundabout" || tags.junction === "circular") {
       features.roundaboutRings!.push(pts);
+    } else if (/^(fence|wall|hedge|retaining_wall)$/.test(tags.barrier ?? "")) {
+      const height = parseFloat(tags.height ?? "");
+      features.barriers!.push({
+        pts, kind: tags.barrier as "fence" | "wall" | "hedge" | "retaining_wall",
+        fenceType: tags.fence_type, material: tags.material, height: Number.isFinite(height) ? height : undefined,
+      });
     } else if (tags.barrier === "guard_rail") {
       features.guardRails.push(pts);
     } else if (tags.highway) {

@@ -500,3 +500,45 @@ export function garageTexture(): Uint8Array {
     return [214 * k + n, 212 * k + n, 200 * k + n];
   }), w, h, { alpha: false });
 }
+
+/** Barrier kinds along property lines, and the texture each one wears. */
+export const BARRIERS = ["colorbond", "paling", "brickwall", "hedge"] as const;
+
+/**
+ * Textures 2 m along by 2 m tall: a Colorbond fence (corrugated steel
+ * panels between posts), timber palings, a garden wall of red brick with a
+ * capping course, and a clipped hedge.
+ */
+export function barrierTexture(kind: (typeof BARRIERS)[number]): Uint8Array {
+  const w = 128, h = 128;
+  const r = rng(201 + kind.length);
+  const leaf = kind === "hedge" ? valueNoise(w, h, 24, 77) : null;
+  return encodePng(fill(w, h, (x, y, i) => {
+    const n = (r() - 0.5) * 10;
+    if (kind === "colorbond") {
+      // Grey-green "Woodland Grey": corrugations every ~7 cm, a post every 2.4 m (here at the tile edge), top rail.
+      if (x < 3 || y < 4) return [70 + n, 72 + n, 66 + n];
+      const k = 0.88 + 0.12 * Math.sin((x / w) * Math.PI * 2 * 28);
+      return [96 * k + n, 99 * k + n, 90 * k + n];
+    }
+    if (kind === "paling") {
+      // 100 mm palings with gaps of shadow, weathered timber, a rail across.
+      const board = x % 6.4 < 0.8;
+      if (board) return [62 + n, 50 + n, 40 + n];
+      if (y > 30 && y < 36) return [96 + n, 80 + n, 62 + n];
+      const grain = ((x * 7 + Math.floor(y / 9) * 3) % 11) * 2;
+      return [150 + grain + n, 124 + grain + n, 94 + n];
+    }
+    if (kind === "brickwall") {
+      if (y < 6) return [182 + n, 176 + n, 166 + n]; // capping
+      const course = Math.floor(y / 5);
+      const mortar = y % 5 < 1 || (x + (course % 2) * 8) % 16 < 1;
+      if (mortar) return [196 + n, 188 + n, 172 + n];
+      const tone = ((course * 7 + Math.floor((x + (course % 2) * 8) / 16) * 13) % 5) * 6;
+      return [150 + tone + n, 78 + tone / 2 + n, 58 + n];
+    }
+    // Hedge: dense leaves, darker in the hollows.
+    const k = 0.55 + leaf![i] * 0.7;
+    return [36 * k + n / 2, 78 * k + n, 32 * k + n / 2];
+  }), w, h, { alpha: false });
+}
