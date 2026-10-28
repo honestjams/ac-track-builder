@@ -70,6 +70,22 @@ describe("kn5", () => {
   });
 });
 
+describe("kn5 texture registers", () => {
+  it("binds each texture slot to the shader's register, whatever order they're listed in", () => {
+    const tex = (name: string) => ({ name, data: encodePng(new Uint8Array(4).fill(255), 1, 1) });
+    const model: Kn5Model = {
+      textures: [tex("d.png"), tex("n.png"), tex("m.png"), tex("x.png")],
+      materials: [{
+        name: "road", shader: "ksPerPixelMultiMap", properties: [],
+        textures: { txDetail: "x.png", txMaps: "m.png", txDiffuse: "d.png", txNormal: "n.png" },
+      }],
+      root: { kind: "node", name: "root", transform: IDENTITY, children: [] },
+    };
+    const back = readKn5(writeKn5(model));
+    expect(back.materials[0].registers).toEqual({ txDetail: 3, txMaps: 2, txDiffuse: 0, txNormal: 1 });
+  });
+});
+
 describe("fast_lane.ai", () => {
   it("round-trips a version 7 spline", () => {
     const pts: AiPoint[] = [0, 1, 2].map((i) => ({

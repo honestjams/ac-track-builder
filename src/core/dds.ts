@@ -1,4 +1,4 @@
-// DXT1 (BC1) DDS encoder with a full mip chain. DDS is the texture format
+// DXT1 (BC1) and DXT5 (BC3, with an alpha channel) DDS encoders with a full mip chain. DDS is the texture format
 // Assetto Corsa itself ships, so aerial textures stay small on disk and in
 // VRAM: a 1024 px chunk is ~680 KB instead of several MB of PNG.
 //
@@ -98,6 +98,64 @@ export function encodeDdsDxt1(rgba: Uint8Array | Uint8ClampedArray, width: numbe
   for (let l = 0; l < levels; l++) {
     for (let by = 0; by < level.h; by += 4) {
       for (let bx = 0; bx < level.w; bx += 4) encodeBlock(level.px, level.w, level.h, bx, by, w);
+    }
+    if (l < levels - 1) level = downsample(level.px, level.w, level.h);
+  }
+  return w.finish();
+}
+
+/** An 8-byte BC3 alpha block: two endpoints and a 3-bit index per pixel (8-value mode). */
+function encodeAlphaBlock(px: Uint8Array | Uint8ClampedArray, w: number, h: number, bx: number, by: number, out: BinaryWriter): void {
+  const a = new Uint8Array(16);
+  let lo = 255, hi = 0;
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      const sx = Math.min(w - 1, bx + x), sy = Math.min(h - 1, by + y);
+      const v = px[(sy * w + sx) * 4 + 3];
+      a[y * 4 + x] = v;
+      lo = Math.min(lo, v);
+      hi = Math.max(hi, v);
+    }
+  }
+  out.u8(hi).u8(lo);
+  // Palette for a0 > a1: a0, a1, then six steps between.
+  const pal = [hi, lo, ...[1, 2, 3, 4, 5, 6].map((k) => ((7 - k) * hi + k * lo) / 7)];
+  let bits = 0n;
+  for (let i = 15; i >= 0; i--) {
+    let best = 0;
+    if (hi !== lo) {
+      let bd = Infinity;
+      for (let p = 0; p < 8; p++) {
+        const d = Math.abs(a[i] - pal[p]);
+        if (d < bd) [bd, best] = [d, p];
+      }
+    }
+    bits = (bits << 3n) | BigInt(best);
+  }
+  for (let k = 0; k < 6; k++) out.u8(Number((bits >> BigInt(k * 8)) & 0xffn));
+}
+
+/** RGBA pixels (top row first) -> DXT5 .dds bytes with mipmaps: colour like DXT1, plus a smooth alpha channel. */
+export function encodeDdsDxt5(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): Uint8Array {
+  let levels = 1;
+  for (let s = Math.max(width, height); s > 1; s >>= 1) levels++;
+  const w = new BinaryWriter(width * height * 2 + 256);
+  w.magic("DDS ");
+  w.u32(124);
+  w.u32(0x1 | 0x2 | 0x4 | 0x1000 | 0x20000 | 0x80000);
+  w.u32(height).u32(width);
+  w.u32(Math.max(1, (width + 3) >> 2) * Math.max(1, (height + 3) >> 2) * 16);
+  w.u32(0).u32(levels);
+  for (let i = 0; i < 11; i++) w.u32(0);
+  w.u32(32).u32(0x4).magic("DXT5").u32(0).u32(0).u32(0).u32(0).u32(0);
+  w.u32(0x1000 | 0x400000 | 0x8).u32(0).u32(0).u32(0).u32(0);
+  let level = { px: rgba as Uint8Array, w: width, h: height };
+  for (let l = 0; l < levels; l++) {
+    for (let by = 0; by < level.h; by += 4) {
+      for (let bx = 0; bx < level.w; bx += 4) {
+        encodeAlphaBlock(level.px, level.w, level.h, bx, by, w);
+        encodeBlock(level.px, level.w, level.h, bx, by, w);
+      }
     }
     if (l < levels - 1) level = downsample(level.px, level.w, level.h);
   }

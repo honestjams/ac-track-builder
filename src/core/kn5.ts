@@ -45,6 +45,20 @@ export interface Kn5ShaderProperty {
   d?: [number, number, number, number];
 }
 
+/**
+ * The shader register each texture slot is bound to, as the game's shaders
+ * declare them (see CSP's recreated Kunos shaders, base/textures_ps.fx).
+ */
+export const TEXTURE_REGISTER: Record<string, number> = {
+  txDiffuse: 0,
+  txNormal: 1, txMask: 1, txVariation: 1,
+  txMaps: 2, txDetailR: 2,
+  txDetail: 3, txDetailG: 3,
+  txNormalDetail: 4, txDetailB: 4,
+  txDetailA: 5,
+  txDetailNM: 6,
+};
+
 export const BlendMode = { Opaque: 0, AlphaBlend: 1, AlphaToCoverage: 2 } as const;
 export const DepthMode = { Normal: 0, NoWrite: 1, Off: 2 } as const;
 
@@ -57,6 +71,8 @@ export interface Kn5Material {
   properties: Kn5ShaderProperty[];
   /** Shader slot (e.g. "txDiffuse") -> texture name. */
   textures: Record<string, string>;
+  /** Read back only: the register each slot was written with. */
+  registers?: Record<string, number>;
 }
 
 export interface Kn5GroupNode {
@@ -235,7 +251,7 @@ export function writeKn5(model: Kn5Model): Uint8Array {
     w.u32(slots.length);
     slots.forEach(([slot, tex], slotIndex) => {
       if (!textureNames.has(tex)) throw new Error(`Material ${m.name} uses missing texture ${tex}`);
-      w.string(slot).u32(slotIndex).string(tex);
+      w.string(slot).u32(TEXTURE_REGISTER[slot] ?? slotIndex).string(tex);
     });
   });
 
@@ -298,9 +314,10 @@ export function readKn5(data: Uint8Array): Kn5Model & { version: number } {
         d: r.f32s(4) as [number, number, number, number],
       });
     }
+    m.registers = {};
     for (let j = 0, tc = r.u32(); j < tc; j++) {
       const slot = r.string();
-      r.u32();
+      m.registers[slot] = r.u32();
       m.textures[slot] = r.string();
     }
     materials.push(m);
