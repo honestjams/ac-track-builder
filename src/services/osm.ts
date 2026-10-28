@@ -165,6 +165,7 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     node(around:40,${around})[highway=street_lamp];
     way(around:40,${around})[power~"^(line|minor_line)$"];
     way(around:45,${around})[barrier~"^(fence|wall|hedge|retaining_wall)$"];
+    way(around:300,${around})[man_made~"^(groyne|breakwater)$"];
   );out tags geom;`;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 45000);
@@ -182,7 +183,7 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     clearTimeout(timer);
     ctl.abort();
   }
-  const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [], poles: [], lamps: [], powerLines: [], barriers: [] };
+  const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [], poles: [], lamps: [], powerLines: [], barriers: [], groynes: [] };
   if (!elements) return { features };
 
   const ways: Way[] = [];
@@ -196,6 +197,8 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     const pts = e.geometry!.map((g) => [g.lon, g.lat] as LngLat);
     if (tags.power === "line" || tags.power === "minor_line") {
       if (onPoles(tags)) features.powerLines!.push(pts);
+    } else if (tags.man_made === "groyne" || tags.man_made === "breakwater") {
+      features.groynes!.push(pts);
     } else if (tags.junction === "roundabout" || tags.junction === "circular") {
       features.roundaboutRings!.push(pts);
     } else if (/^(fence|wall|hedge|retaining_wall)$/.test(tags.barrier ?? "")) {

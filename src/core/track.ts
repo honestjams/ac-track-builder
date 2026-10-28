@@ -15,6 +15,7 @@ import { simplify } from "./polyline";
 import { applyElevation, inRoundabout, isLoop, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
 import { extendRoute, pathLength } from "./extend";
 import { keepOffRoute, onRoute } from "./clearance";
+import { buildGroynes, buildPiers, buildSea, buildSeawall, deckTexture, rockTexture, SeaMask, seaTexture, withSeabed, type CoastPolygon } from "./coast";
 import { buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
 import { buildKerbReturns, buildKerbs, KERB_BACK, KERB_H, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
@@ -44,6 +45,12 @@ import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, streetS
 /** Progress callback; a returned promise is awaited, which lets a UI repaint. */
 export type Progress = (stage: string, fraction?: number) => void | Promise<void>;
 
+/** A polygon from the vector tiles, in lng/lat: exterior ring first; `edge` false on tile seams. */
+export interface CoastSource {
+  rings: LngLat[][];
+  edge: boolean[][];
+}
+
 export interface DataSources {
   /** Height sampler (local metres) covering `bounds`. */
   dem(proj: LocalProjection, bounds: Bounds, zoom: number): Promise<HeightFn>;
@@ -72,6 +79,8 @@ export interface DataSources {
   roundabouts?: RoundaboutHint[];
   /** Road class at a point (OpenMapTiles: motorway, primary, minor, ...). */
   roadClassAt?(p: LngLat): string | undefined;
+  /** The sea, piers and beaches (OSM via vector tiles): polygons, exterior ring first; `edge` false on tile seams. */
+  coast?: { ocean: CoastSource[]; piers: CoastSource[]; beaches?: CoastSource[] };
   /** Asphalt width at a point from map data, metres. */
   widthAt?(p: LngLat): number | undefined;
   /** Credit line for the imagery source(s), written into the README; read after imagery is fetched. */
@@ -90,6 +99,8 @@ export interface OsmFeatures {
   poles?: LngLat[];
   lamps?: LngLat[];
   powerLines?: LngLat[][];
+  /** Rock groynes and breakwaters (OSM man_made=groyne|breakwater) near the route. */
+  groynes?: LngLat[][];
 }
 
 export interface TrackResult {
@@ -369,10 +380,18 @@ export async function buildTrack(
 
   await progress("Fetching elevation");
   const bounds = boundsOf(plan.samples.map((s) => s.pos), opts.corridor + opts.terrainBlend + 60);
-  const dem = await sources.dem(proj, bounds, opts.demZoom);
+  const landDem = await sources.dem(proj, bounds, opts.demZoom);
   // The horizon only needs coarse heights; a separate low-zoom DEM keeps the download small.
   const farBounds = boundsOf(plan.samples.map((s) => s.pos), opts.horizon + BACKDROP_CHUNK);
-  const farDem = opts.horizon > 0 ? await sources.dem(proj, farBounds, Math.min(opts.demZoom, 12)) : dem;
+  const landFarDem = opts.horizon > 0 ? await sources.dem(proj, farBounds, Math.min(opts.demZoom, 12)) : landDem;
+  // The sea: a seabed under a water surface, so the bay isn't flat ground.
+  const toCoast = (p: CoastSource): CoastPolygon => ({ rings: p.rings.map((r) => r.map((q) => proj.toLocal(q))), edge: p.edge });
+  const ocean = opts.sea ? (sources.coast?.ocean ?? []).map(toCoast) : [];
+  const piers = opts.sea ? (sources.coast?.piers ?? []).map(toCoast) : [];
+  const beaches = opts.sea ? (sources.coast?.beaches ?? []).map(toCoast) : [];
+  const sea = new SeaMask(ocean, farBounds.minX, farBounds.minY, farBounds.maxX, farBounds.maxY);
+  const dem = ocean.length ? withSeabed(landDem, sea) : landDem;
+  const farDem = ocean.length ? withSeabed(landFarDem, sea) : landFarDem;
   applyElevation(plan, dem, opts);
   const index = new SegmentIndex(plan);
   const terrainAt = makeTerrainFn(plan, index, dem, opts);
@@ -415,6 +434,11 @@ export async function buildTrack(
     textures.push({ name: `${name}.png`, data: png }, { name: `${name}_nm.png`, data: encodePng(normalFromHeight(rgba, width, height, strength), width, height, { alpha: false }) });
     materials.push(nmMaterial(name, `${name}.png`, `${name}_nm.png`, light));
   };
+  // Sea, jetty and rock (seawall and groynes).
+  addScenery("sea.png", seaTexture(), material("sea", "sea.png", { ambient: 0.4, diffuse: 0.35, specular: 0.7, exp: 90 }));
+  addScenery("jetty_deck.png", deckTexture(), material("jetty_deck", "jetty_deck.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
+  addScenery("jetty_timber.png", solidTexture([118, 108, 96]), material("jetty_timber", "jetty_timber.png", { ambient: 0.45, diffuse: 0.45, specular: 0, exp: 1 }));
+  reliefScenery("rock", rockTexture(), { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }, 4);
   for (const b of BARRIERS) reliefScenery(`barrier_${b}`, barrierTexture(b), { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 15 }, b === "hedge" ? 2 : 3);
   addScenery("window.png", windowTexture(), material("window", "window.png", { ambient: 0.35, diffuse: 0.3, specular: 0.6, exp: 80 }));
   addScenery("door.png", solidTexture([92, 62, 44]), material("door", "door.png", { ambient: 0.45, diffuse: 0.45, specular: 0.15, exp: 15 }));
@@ -913,11 +937,17 @@ export async function buildTrack(
         group("GUIDEPOSTS", posts),
         group("BUILDINGS", houses),
         group("FENCES", keepOffRoute(barriers, onRoad).nodes),
+        group("JETTY", piers.length ? buildPiers(piers, buildingGround, sea) : []),
+        group("SEAWALL", ocean.length ? [
+          ...buildSeawall(beaches, buildingGround, sea, (x, y) => !!index.nearest(x, y, 250), piers),
+          ...buildGroynes((sources.osm?.groynes ?? []).map((l) => l.map((p) => proj.toLocal(p))), buildingGround),
+        ] : []),
       ]),
       // Already in compact chunks (terrain, horizon), or never drawn (walls).
       group("TERRAIN", terrainNodes),
       group("WALLS", [...walls, ...trunks]),
       group("HORIZON", backdropNodes),
+      group("SEA", ocean.length ? buildSea(ocean) : []),
       ...trackObjects(plan, opts),
     ]),
   };
