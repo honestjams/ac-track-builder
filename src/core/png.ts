@@ -1,7 +1,7 @@
 // Minimal PNG encoder (8-bit RGBA or RGB, filter type "up"), so textures and
 // UI images can be produced the same way in the browser and in Node tests.
 
-import { zlibSync } from "fflate";
+import { unzlibSync, zlibSync } from "fflate";
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -71,4 +71,39 @@ export function encodePng(
     off += p.length;
   }
   return out;
+}
+
+/**
+ * Decodes a PNG made by encodePng (8-bit RGB or RGBA, "up" filter only)
+ * back to RGBA pixels: for deriving maps from textures we generate.
+ */
+export function decodeOwnPng(png: Uint8Array): { rgba: Uint8Array; width: number; height: number } {
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  const width = view.getUint32(16), height = view.getUint32(20);
+  const channels = png[25] === 6 ? 4 : 3;
+  const idat: Uint8Array[] = [];
+  for (let p = 8; p < png.length;) {
+    const len = view.getUint32(p);
+    const type = String.fromCharCode(png[p + 4], png[p + 5], png[p + 6], png[p + 7]);
+    if (type === "IDAT") idat.push(png.subarray(p + 8, p + 8 + len));
+    p += 12 + len;
+  }
+  const joined = new Uint8Array(idat.reduce((n, c) => n + c.length, 0));
+  idat.reduce((o, c) => (joined.set(c, o), o + c.length), 0);
+  const raw = unzlibSync(joined);
+  const stride = width * channels;
+  const rgba = new Uint8Array(width * height * 4);
+  let prev = new Uint8Array(stride);
+  for (let y = 0; y < height; y++) {
+    const o = y * (stride + 1);
+    if (raw[o] !== 2 && raw[o] !== 0) throw new Error("decodeOwnPng: only the up and none filters are supported");
+    const row = new Uint8Array(stride);
+    for (let i = 0; i < stride; i++) row[i] = (raw[o + 1 + i] + (raw[o] === 2 ? prev[i] : 0)) & 0xff;
+    for (let x = 0; x < width; x++) {
+      for (let k = 0; k < channels; k++) rgba[(y * width + x) * 4 + k] = row[x * channels + k];
+      if (channels === 3) rgba[(y * width + x) * 4 + 3] = 255;
+    }
+    prev = row;
+  }
+  return { rgba, width, height };
 }

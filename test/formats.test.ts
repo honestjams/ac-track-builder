@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { unzlibSync } from "fflate";
 import { frameTransform, IDENTITY, readKn5, writeKn5, type Kn5Model } from "../src/core/kn5";
 import { readFastLaneAi, writeFastLaneAi, type AiPoint } from "../src/core/aiSpline";
-import { encodePng } from "../src/core/png";
+import { decodeOwnPng, encodePng } from "../src/core/png";
 
 function quad(): Kn5Model {
   const positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, -1, 0, 0, -1]);
@@ -131,5 +131,19 @@ describe("dds", () => {
     expect(new TextDecoder().decode(dds.subarray(84, 88))).toBe("DXT1");
     expect(dds.length).toBe(128 + (4 + 1 + 1 + 1) * 8);
     expect(v.getUint16(128, true)).toBe(0xf800); // pure red endpoint
+  });
+});
+
+describe("png round trip", () => {
+  it("decodes what it encodes, RGB and RGBA", () => {
+    const w = 5, h = 3;
+    const px = Uint8Array.from({ length: w * h * 4 }, (_, i) => (i * 37) % 256);
+    const back = decodeOwnPng(encodePng(px, w, h));
+    expect(back.width).toBe(w);
+    expect(Array.from(back.rgba)).toEqual(Array.from(px));
+    const rgb = decodeOwnPng(encodePng(px, w, h, { alpha: false }));
+    for (let i = 0; i < w * h; i++) {
+      expect([rgb.rgba[i * 4], rgb.rgba[i * 4 + 1], rgb.rgba[i * 4 + 2], rgb.rgba[i * 4 + 3]]).toEqual([px[i * 4], px[i * 4 + 1], px[i * 4 + 2], 255]);
+    }
   });
 });

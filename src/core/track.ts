@@ -20,6 +20,7 @@ import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
 import { buildKerbReturns, buildKerbs, KERB_BACK, KERB_H, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
 import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1, encodeDdsDxt5 } from "./dds";
+import { decodeOwnPng, encodePng } from "./png";
 import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
 import { BARRIERS, barrierTexture, detailTexture, normalFromHeight, windowTexture, flatNormalTexture, grassAlpha, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
@@ -254,6 +255,24 @@ function material(name: string, texture: string, light: { ambient: number; diffu
   };
 }
 
+/** A normal-mapped material (ksPerPixelNM): relief without reflections. Parameter names as the shader declares them. */
+function nmMaterial(name: string, diffuse: string, normal: string, light: { ambient: number; diffuse: number; specular: number; exp: number }): Kn5Material {
+  const base = material(name, diffuse, light);
+  return {
+    ...base,
+    shader: "ksPerPixelNM",
+    properties: [
+      ...base.properties,
+      { name: "fresnelC", a: 0 },
+      { name: "fresnelEXP", a: 5 },
+      { name: "fresnelMaxLevel", a: 0 },
+      { name: "nmObjectSpace", a: 0 },
+      { name: "isAdditive", a: 0 },
+    ],
+    textures: { txDiffuse: diffuse, txNormal: normal },
+  };
+}
+
 /**
  * A detail-mapped material (ksPerPixelMultiMap): the diffuse texture, a
  * normal map, txMaps (specular, gloss, sun specular) and a tiling detail
@@ -388,7 +407,15 @@ export async function buildTrack(
   addScenery("lamp.png", solidTexture([150, 152, 150]), material("lamp", "lamp.png", { ambient: 0.45, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("signal.png", solidTexture([28, 30, 26]), material("signal", "signal.png", { ambient: 0.4, diffuse: 0.4, specular: 0.2, exp: 20 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
-  for (const b of BARRIERS) addScenery(`barrier_${b}.png`, barrierTexture(b), material(`barrier_${b}`, `barrier_${b}.png`, { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 15 }));
+  // Walls, roofs and fences: with detail shaders, a normal map from each texture's own shading
+  // (mortar joints, weatherboard laps, corrugations) gives them relief.
+  const reliefScenery = (name: string, png: Uint8Array, light: { ambient: number; diffuse: number; specular: number; exp: number }, strength: number) => {
+    if (!opts.detailShaders) return addScenery(`${name}.png`, png, material(name, `${name}.png`, light));
+    const { rgba, width, height } = decodeOwnPng(png);
+    textures.push({ name: `${name}.png`, data: png }, { name: `${name}_nm.png`, data: encodePng(normalFromHeight(rgba, width, height, strength), width, height, { alpha: false }) });
+    materials.push(nmMaterial(name, `${name}.png`, `${name}_nm.png`, light));
+  };
+  for (const b of BARRIERS) reliefScenery(`barrier_${b}`, barrierTexture(b), { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 15 }, b === "hedge" ? 2 : 3);
   addScenery("window.png", windowTexture(), material("window", "window.png", { ambient: 0.35, diffuse: 0.3, specular: 0.6, exp: 80 }));
   addScenery("door.png", solidTexture([92, 62, 44]), material("door", "door.png", { ambient: 0.45, diffuse: 0.45, specular: 0.15, exp: 15 }));
   addScenery("garage.png", garageTexture(), material("garage", "garage.png", { ambient: 0.45, diffuse: 0.45, specular: 0.2, exp: 20 }));
@@ -405,10 +432,10 @@ export async function buildTrack(
   addScenery("concrete.png", concreteTexture(), material("concrete", "concrete.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
   addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
   for (const f of FACADES) {
-    addScenery(`facade_${f}.png`, facadeTexture(f), material(`facade_${f}`, `facade_${f}.png`, { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
+    reliefScenery(`facade_${f}`, facadeTexture(f), { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }, 3);
   }
   for (const c of ROOF_COLOURS) {
-    addScenery(`roof_${c.name}.png`, roofTexture(c), material(`roof_${c.name}`, `roof_${c.name}.png`, { ambient: 0.45, diffuse: 0.45, specular: c.tile ? 0.05 : 0.25, exp: 25 }));
+    reliefScenery(`roof_${c.name}`, roofTexture(c), { ambient: 0.45, diffuse: 0.45, specular: c.tile ? 0.05 : 0.25, exp: 25 }, 4);
   }
   const detected: Building[] = [];
   const treeSpots: TreeSpot[] = [];
