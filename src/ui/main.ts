@@ -133,80 +133,23 @@ function renderPins(): void {
 function removePin(i: number): void {
   pins.splice(i, 1);
   renderPins();
-$<HTMLInputElement>("mapillaryToken").value = savedToken();
-
-// Test hook for the browser smoke test (dev server only).
-if (import.meta.env.DEV) {
-  (window as unknown as { __app: object }).__app = {
-    map,
-    addPin(p: LngLat) {
-      pins.push(p);
-      renderPins();
-      refreshRoute();
-    },
-    result: () => lastResult,
-    preview: () => preview,
-  };
-}
   refreshRoute();
 }
 
 map.on("click", (e: L.LeafletMouseEvent) => {
   pins.push([e.latlng.lng, e.latlng.lat]);
   renderPins();
-
-// Test hook for the browser smoke test (dev server only).
-if (import.meta.env.DEV) {
-  (window as unknown as { __app: object }).__app = {
-    map,
-    addPin(p: LngLat) {
-      pins.push(p);
-      renderPins();
-      refreshRoute();
-    },
-    result: () => lastResult,
-    preview: () => preview,
-  };
-}
   refreshRoute();
 });
 
 $("reverse").onclick = () => {
   pins.reverse();
   renderPins();
-
-// Test hook for the browser smoke test (dev server only).
-if (import.meta.env.DEV) {
-  (window as unknown as { __app: object }).__app = {
-    map,
-    addPin(p: LngLat) {
-      pins.push(p);
-      renderPins();
-      refreshRoute();
-    },
-    result: () => lastResult,
-    preview: () => preview,
-  };
-}
   refreshRoute();
 };
 $("clear").onclick = () => {
   pins = [];
   renderPins();
-
-// Test hook for the browser smoke test (dev server only).
-if (import.meta.env.DEV) {
-  (window as unknown as { __app: object }).__app = {
-    map,
-    addPin(p: LngLat) {
-      pins.push(p);
-      renderPins();
-      refreshRoute();
-    },
-    result: () => lastResult,
-    preview: () => preview,
-  };
-}
   refreshRoute();
 };
 $<HTMLInputElement>("loop").onchange = () => refreshRoute();
@@ -560,6 +503,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 renderPins();
+$<HTMLInputElement>("mapillaryToken").value = savedToken();
 
 // Test hook for the browser smoke test (dev server only).
 if (import.meta.env.DEV) {
