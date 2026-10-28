@@ -14,7 +14,7 @@
 
 import type { Piece } from "./furniture";
 import type { Kn5MeshNode } from "./kn5";
-import { KERB_BACK } from "./kerbs";
+import { KERB_BACK, KERB_H, LAYBACK } from "./kerbs";
 import { MeshBuilder } from "./mesh";
 import type { RoadPlan, RoadSample } from "./road";
 import { chunkRanges, pad } from "./roadMesh";
@@ -151,6 +151,13 @@ export function readVerge(
   return { paths, drives };
 }
 
+/** Per-sample kerb laybacks ([left, right]): 1 across each crossover. */
+export function laybacks(n: number, vc: VergeConcrete): [number[], number[]] {
+  const out: [number[], number[]] = [new Array(n).fill(0), new Array(n).fill(0)];
+  for (const d of vc.drives) for (let i = d.i0; i <= d.i1; i++) out[d.side === 1 ? 0 : 1][i] = 1;
+  return out;
+}
+
 function median(v: number[]): number {
   const s = v.slice().sort((a, b) => a - b);
   return s[s.length >> 1];
@@ -196,7 +203,12 @@ export function buildVergeConcrete(
       const a = plan.samples[i], b = plan.samples[i + 1];
       // Up to the footpath where there is one; it carries on past it.
       const reach = Math.max(d.d1, vc.paths[k][i]?.d0 ?? 0);
-      slab(dm, at(a, d.side, KERB_BACK), at(a, d.side, reach), at(b, d.side, KERB_BACK), at(b, d.side, reach), a.s, b.s, d.side);
+      // From the top of the laid-back kerb, up to the strip's level.
+      const low = (s: RoadSample): [number, number, number] => {
+        const p = at(s, d.side, KERB_BACK);
+        return [p[0], p[1], p[2] - PROUD - KERB_H * LAYBACK + 0.005];
+      };
+      slab(dm, low(a), at(a, d.side, reach), low(b), at(b, d.side, reach), a.s, b.s, d.side);
     }
   }
   if (dm.indices.length) out.push(dm.toKn5("1STREET_DRIVE_000", "concrete"));

@@ -38,6 +38,9 @@ const VERGE_DROP = 0.2;
 /** Concrete texture repeats (one pour between joints) every this many metres. */
 const POUR = 3;
 
+/** How much of the kerb's height a driveway layback takes away. */
+export const LAYBACK = 0.65;
+
 /** Lateral offset of the kerb's back edge (start of the nature strip) from the road edge. */
 export const KERB_BACK = GUTTER + FACE_RUN + KERB_TOP;
 
@@ -178,14 +181,16 @@ export type StripMaterialFn = (ci: number, a: number, b: number) => { material: 
 type Seg = { mesh: "gutter" | "kerb" | "strip"; a: [number, number]; b: [number, number]; ua: number; ub: number };
 
 /** The kerb cross-section on one side, left to right, as (t, z) pairs. */
-function profile(s: RoadSample, side: 1 | -1, k: number, opts: BuildOptions, photo: boolean): Seg[] {
+function profile(s: RoadSample, side: 1 | -1, k: number, opts: BuildOptions, photo: boolean, drop = 0): Seg[] {
   const half = s.width / 2;
   const e = surfaceHeight(s, half * side, opts.crown);
-  const top = e + KERB_H * k, inv = e - GUTTER_DIP * k;
+  // At a driveway the kerb is laid back: lower, with a long gentle face.
+  const top = e + KERB_H * k * (1 - LAYBACK * drop), inv = e - GUTTER_DIP * k;
+  const full = e + KERB_H * k;
   // The strip keeps its width where a kerb starts or ends and slopes down to verge level instead.
   const tOut = half + opts.vergeWidth + STRIP_EXTRA;
-  const zOut = top + 0.02 * k - VERGE_DROP * (1 - k);
-  const tIn = half + KERB_BACK * k, tFace = half + (GUTTER + FACE_RUN) * k, tLip = half + GUTTER * k;
+  const zOut = full + 0.02 * k - VERGE_DROP * (1 - k);
+  const tIn = half + KERB_BACK * k, tFace = half + (GUTTER + FACE_RUN + (KERB_TOP - 0.02) * drop) * k, tLip = half + GUTTER * k;
   // Photo u for the strip: left strip 0..0.5 (outer to kerb), right 0.5..1 (kerb to outer).
   const uOut = photo ? (side === 1 ? 0 : 1) : 0, uIn = photo ? 0.5 : (opts.vergeWidth + STRIP_EXTRA - KERB_BACK) / 4;
   const segs: Seg[] = [
@@ -207,6 +212,8 @@ export function buildKerbs(
   stripMaterial: StripMaterialFn,
   /** Sections (`${i}:${side}`, from sample i to i + 1) whose start or end slope a kerb return replaces. */
   noRamp: Set<string> = new Set(),
+  /** Laybacks: 1 where a driveway crosses the kerb, per sample and side ([left, right]). */
+  drops?: [number[], number[]],
 ): KerbMeshes {
   const samples = plan.samples;
   const n = samples.length;
@@ -227,7 +234,7 @@ export function buildKerbs(
       // Each segment of the profile is its own ribbon, so creases stay sharp.
       const rows = [] as { segs: Seg[]; v: number; vs: number }[];
       for (let i = a; i <= b; i++) {
-        rows.push({ segs: profile(at(i), side, kerb[k][i % n], opts, strip.photo), v: sAt(i) / POUR, vs: strip.photo ? (sAt(i) - sa) / Math.max(1e-6, sb - sa) : sAt(i) / 4 });
+        rows.push({ segs: profile(at(i), side, kerb[k][i % n], opts, strip.photo, drops?.[k][i % n] ?? 0), v: sAt(i) / POUR, vs: strip.photo ? (sAt(i) - sa) / Math.max(1e-6, sb - sa) : sAt(i) / 4 });
       }
       const nSeg = rows[0].segs.length;
       for (let g = 0; g < nSeg; g++) {

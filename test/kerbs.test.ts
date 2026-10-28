@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { planRoad } from "../src/core/road";
 import { withDefaults } from "../src/core/options";
-import { buildKerbReturns, buildKerbs, kerbEvidence, KERB_H, planKerbs, RETURN_R } from "../src/core/kerbs";
+import { buildKerbReturns, buildKerbs, kerbEvidence, KERB_H, LAYBACK, planKerbs, RETURN_R } from "../src/core/kerbs";
 import type { RasterSampler } from "../src/core/trace";
 import type { Vec2 } from "../src/core/geo";
 
@@ -120,5 +120,25 @@ describe("kerb and gutter", () => {
     // Full height well up the street, sloping away only at the far end.
     expect(pts.some(([x, y, z]) => Math.abs(Math.abs(x - x0) - 3.5 - 0.4) < 0.3 && y > 20 && y < 24 && z > 10 + KERB_H - 0.02)).toBe(true);
     expect(Math.max(...pts.map(([, y]) => y))).toBeGreaterThan(30);
+  });
+
+  it("lays the kerb back across a driveway, full height either side", () => {
+    plan.samples.forEach((s) => (s.h = 10));
+    const k: [number[], number[]] = [plan.samples.map(() => 1), plan.samples.map(() => 0)];
+    const mid = plan.samples.findIndex((s) => s.s >= 150);
+    const drops: [number[], number[]] = [plan.samples.map((_, i) => (Math.abs(i - mid) <= 1 ? 1 : 0)), plan.samples.map(() => 0)];
+    const m = buildKerbs(plan, opts, k, () => ({ material: "grass", photo: false }), undefined, drops);
+    const edge = 10 - opts.crown * 4;
+    const topAt = (x: number) => {
+      let z = -Infinity;
+      for (const node of m.kerb) {
+        for (let i = 0; i < node.positions.length; i += 3) if (Math.abs(node.positions[i] - x) < 0.01) z = Math.max(z, node.positions[i + 1]);
+      }
+      return z;
+    };
+    const x0 = plan.samples[mid].pos[0];
+    expect(topAt(x0)).toBeCloseTo(edge + KERB_H * (1 - LAYBACK), 2);
+    expect(topAt(x0 - 20)).toBeCloseTo(edge + KERB_H, 2);
+    expect(topAt(x0 + 20)).toBeCloseTo(edge + KERB_H, 2);
   });
 });

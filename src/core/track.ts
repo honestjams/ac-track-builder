@@ -33,7 +33,7 @@ import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, gateSigns, landmarks, mergeSightings, seenFeatures, streetSigns } from "./furniture";
 import { placeUtilities } from "./utilities";
-import { buildVergeConcrete, letterboxes, readVerge } from "./footpaths";
+import { buildVergeConcrete, laybacks, letterboxes, readVerge } from "./footpaths";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, displayOf, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, streetSurface, type StreetLine, type StreetName } from "./sideStreets";
@@ -606,10 +606,10 @@ export async function buildTrack(
     previewTextures["returns_photo.dds"] = returns.atlas;
     materials.push(material("returns_photo", "returns_photo.dds", { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
   }
-  const kerbMeshes = buildKerbs(plan, opts, kerbs, stripMaterial, returns?.noRamp);
-  // Footpaths and driveway crossovers in the nature strip, where the photo shows them.
+  // Footpaths and driveway crossovers in the nature strip, where the photo shows them; the kerb lays back at each driveway.
   const stripOuter = opts.vergeWidth + STRIP_EXTRA;
   const verge = opts.kerbs && raster ? readVerge(plan, raster, kerbs, stripOuter, (x, y) => streetIndex.clearance(x, y) < 0.5) : null;
+  const kerbMeshes = buildKerbs(plan, opts, kerbs, stripMaterial, returns?.noRamp, verge ? laybacks(nS, verge) : undefined);
   const vergeGround = (x: number, y: number, d: number, smp: RoadSample, side: 1 | -1) =>
     d <= stripOuter ? surfaceHeight(smp, (side * smp.width) / 2, opts.crown) + KERB_H : terrainAt(x, y).h;
   const vergeConcrete = verge ? buildVergeConcrete(plan, verge, vergeGround) : [];
