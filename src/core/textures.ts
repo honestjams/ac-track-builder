@@ -269,16 +269,19 @@ export class Raster {
 
 /** Tree atlas variants: u ranges within the 512 x 512 atlas. */
 export const TREE_VARIANTS = [
-  { u0: 0, u1: 0.5, kind: "broadleaf" },
-  { u0: 0.5, u1: 1, kind: "conifer" },
+  { u0: 0, u1: 0.25, kind: "broadleaf", height: 12, width: 10.2 },
+  { u0: 0.25, u1: 0.5, kind: "conifer", height: 15, width: 8.25 },
+  { u0: 0.5, u1: 0.75, kind: "eucalypt", height: 16, width: 9.6 },
+  { u0: 0.75, u1: 1, kind: "palm", height: 10, width: 7 },
 ] as const;
 
 /**
- * Two tree sprites side by side with an alpha channel, for alpha-tested
- * crossed-quad trees: an open eucalypt/broadleaf canopy and a conifer.
+ * Tree sprites side by side with an alpha channel, for alpha-tested
+ * crossed-quad trees: a broadleaf shade tree, a conifer, a eucalypt (pale
+ * trunk, sparse grey-green clumps you can see through) and a palm.
  */
 export function treeAtlas(): Uint8Array {
-  const w = 512, h = 512;
+  const w = 1024, h = 512;
   const px = new Uint8Array(w * h * 4);
   const r = rng(41);
   const put = (x: number, y: number, c: [number, number, number]) => {
@@ -289,14 +292,23 @@ export function treeAtlas(): Uint8Array {
     px[i + 2] = c[2];
     px[i + 3] = 255;
   };
-  const blob = (cx: number, cy: number, rad: number, shade: number, x0: number, x1: number) => {
+  const green: [number, number, number] = [34, 70, 30];
+  const blob = (cx: number, cy: number, rad: number, shade: number, x0: number, x1: number, col = green, holes = 0.55) => {
     for (let y = cy - rad; y <= cy + rad; y++) {
       for (let x = Math.max(x0, cx - rad); x <= Math.min(x1 - 1, cx + rad); x++) {
         const d = Math.hypot(x - cx, y - cy) / rad;
-        if (d > 1 || r() < d * d * 0.55) continue; // ragged, see-through edges
+        if (d > 1 || r() < d * d * holes) continue; // ragged, see-through edges
         const k = shade * (0.75 + 0.35 * (1 - d)) * (0.85 + r() * 0.3);
-        put(x, y, [34 * k + 8, 70 * k + 14, 30 * k + 6]);
+        put(x, y, [col[0] * k + 8, col[1] * k + 14, col[2] * k + 6]);
       }
+    }
+  };
+  const line = (x0: number, y0: number, x1: number, y1: number, width: number, col: (t: number) => [number, number, number]) => {
+    const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
+    for (let i = 0; i <= n; i++) {
+      const t = i / Math.max(1, n), x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+      const wd = typeof width === "number" ? width : 1;
+      for (let dx = -wd / 2; dx <= wd / 2; dx++) put(x + dx, y, col(t));
     }
   };
   // Broadleaf: trunk with a couple of branches, clumped canopy.
@@ -315,6 +327,45 @@ export function treeAtlas(): Uint8Array {
     for (let i = 0; i < 26; i++) {
       const x = 384 + (r() * 2 - 1) * half;
       blob(x, y + r() * 30, 10 + r() * 10, 0.55 + r() * 0.45, 256, 512);
+    }
+  }
+  // Eucalypt: a tall pale trunk forking into a few limbs, sparse grey-green clumps at their ends.
+  const gum = (t: number): [number, number, number] => {
+    const patch = r() < 0.15 ? 0.82 : 1;
+    return [(208 - t * 20) * patch + r() * 10, (200 - t * 22) * patch + r() * 10, (184 - t * 26) * patch + r() * 8];
+  };
+  for (let y = 250; y < 512; y++) {
+    const t = 3 + (y - 250) * 0.018;
+    for (let x = 640 - t; x < 640 + t; x++) put(x, y, gum((512 - y) / 262));
+  }
+  const limbs: [number, number][] = [[-62, 120], [-30, 70], [8, 40], [44, 85], [70, 140], [-80, 190], [86, 205]];
+  for (const [dx, ty] of limbs) {
+    const bx = 640 + dx * 0.25, by = 250 + (ty > 150 ? 20 : 0);
+    line(bx, by, 640 + dx, ty, ty > 150 ? 3 : 4, (t) => gum(0.6 + t * 0.4));
+    for (let i = 0; i < 7; i++) {
+      blob(640 + dx + (r() - 0.5) * 60, ty + (r() - 0.5) * 50, 9 + r() * 14, 0.75 + r() * 0.5, 512, 768, [92, 104, 72], 0.75);
+    }
+  }
+  // Palm: a thin ringed trunk with a crown of drooping fronds.
+  const cx = 896, cy = 150;
+  for (let y = cy; y < 512; y++) {
+    const x = cx + Math.sin((y - cy) / 120) * 6;
+    const ring = (y % 9) < 2 ? 0.8 : 1;
+    for (let dx = -4; dx <= 4; dx++) put(x + dx, y, [118 * ring + r() * 12, 104 * ring + r() * 10, 86 * ring]);
+  }
+  for (let f = 0; f < 14; f++) {
+    const a = (f / 14) * Math.PI * 2 + r() * 0.2, L = 95 + r() * 25, lift = 0.35 + r() * 0.35;
+    let px0 = cx, py0 = cy;
+    for (let i = 1; i <= 24; i++) {
+      const t = i / 24;
+      const x = cx + Math.cos(a) * L * t, y = cy - Math.sin(Math.abs(Math.sin(a)) * lift + 0.15) * L * t * (1 - t) * 1.6 + 70 * t * t;
+      line(px0, py0, x, y, 2, () => [70 + r() * 15, 96 + r() * 20, 46]);
+      // Leaflets either side of the frond.
+      const nx = -(y - py0), ny = x - px0, nl = Math.hypot(nx, ny) || 1;
+      const len = 14 * (1 - t * 0.6);
+      for (const sgn of [1, -1]) line(x, y, x + (nx / nl) * len * sgn, y + (ny / nl) * len * sgn + len * 0.5, 1, () => [52 + r() * 20, 98 + r() * 25, 40 + r() * 10]);
+      px0 = x;
+      py0 = y;
     }
   }
   return encodePng(px, w, h);

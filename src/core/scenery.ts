@@ -100,7 +100,7 @@ export function treeSpotsFromImagery(
         x: chunk.minX + px / pxPerM,
         y: chunk.maxY - py / pxPerM,
         scale: 0.75 + rand() * 0.6,
-        variant: rand() < 0.2 ? 1 : 0,
+        variant: treeKind(rand()),
       });
     }
   }
@@ -108,7 +108,15 @@ export function treeSpotsFromImagery(
 }
 
 /** Crown radius of a tree sprite at scale 1, metres (half the quad width). */
-export const CROWN_RADIUS = [12 * 0.85 / 2, 15 * 0.55 / 2];
+export const CROWN_RADIUS = TREE_VARIANTS.map((v) => v.width / 2);
+
+/**
+ * An Australian street's mix: mostly gums, then broadleaf shade trees,
+ * some palms, a few conifers. Index into TREE_VARIANTS.
+ */
+export function treeKind(x: number): number {
+  return x < 0.45 ? 2 : x < 0.75 ? 0 : x < 0.9 ? 3 : 1;
+}
 
 /**
  * Keeps trunks off the road and verges and inside the terrain corridor.
@@ -142,7 +150,7 @@ export function buildTrees(spots: TreeSpot[], ground: HeightFn, name = "TREES"):
   for (const t of spots) {
     const mb = out.next();
     const v = TREE_VARIANTS[t.variant];
-    const H = (v.kind === "conifer" ? 15 : 12) * t.scale;
+    const H = v.height * t.scale;
     const W = CROWN_RADIUS[t.variant] * 2 * t.scale;
     const z = ground(t.x, t.y) - 0.3;
     const rot = rand() * Math.PI;

@@ -292,15 +292,16 @@ export function filterBuildings(buildings: Building[], index: SegmentIndex, opts
   });
 }
 
-function wall(mb: MeshBuilder, p: Vec2, q: Vec2, base: number, top: number, u0: number): number {
+function wall(mb: MeshBuilder, p: Vec2, q: Vec2, base: number, top: number, u0: number, floor: number): number {
   const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
   const n: Vec3 = [(q[1] - p[1]) / (len || 1), -(q[0] - p[0]) / (len || 1), 0];
   const i = mb.vertexCount;
-  const u1 = u0 + len / 8, v1 = (top - base) / 3; // texture: 8 m by 3 m
-  mb.vertex([p[0], p[1], base], u0, v1);
-  mb.vertex([q[0], q[1], base], u1, v1);
-  mb.vertex([q[0], q[1], top], u1, 0);
-  mb.vertex([p[0], p[1], top], u0, 0);
+  // Texture: 8 m by one 3 m storey, its bottom on the ground floor, so windows sit at sill height on every storey.
+  const u1 = u0 + len / 8, v = (z: number) => 1 - (z - floor) / 3;
+  mb.vertex([p[0], p[1], base], u0, v(base));
+  mb.vertex([q[0], q[1], base], u1, v(base));
+  mb.vertex([q[0], q[1], top], u1, v(top));
+  mb.vertex([p[0], p[1], top], u0, v(top));
   for (let j = 0; j < 4; j++) mb.normals!.push(...n);
   mb.quad(i, i + 1, i + 2, i + 3);
   return u1;
@@ -385,7 +386,7 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
     const wm = walls[b.facade].next(ring.length * 4 + 8);
     const rm = roofs[b.roofColour].next(ring.length * 3 + 8);
     let u = 0;
-    for (let k = 0; k < ring.length; k++) u = wall(wm, ring[k], ring[(k + 1) % ring.length], base, top, u);
+    for (let k = 0; k < ring.length; k++) u = wall(wm, ring[k], ring[(k + 1) % ring.length], base, top, u, Math.min(...hs));
     if (b.roof !== "flat" && ring.length === 4) {
       // Rotate so r[0]->r[1] is a long side (an eave).
       const l0 = Math.hypot(ring[1][0] - ring[0][0], ring[1][1] - ring[0][1]);
@@ -418,8 +419,10 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
       } else {
         // Gable ends: the wall carries on up to the ridge, in the wall's plane.
         const wallRidge = (sign: -1 | 1): Vec3 => [c[0] + e[0] * sign * long / 2, c[1] + e[1] * sign * long / 2, ridgeZ];
-        face(wm, [at(r[1]), at(r[2]), wallRidge(1)], (p) => [p[0] / 8, (ridgeZ - p[2]) / 3]);
-        face(wm, [at(r[3]), at(r[0]), wallRidge(-1)], (p) => [p[0] / 8, (ridgeZ - p[2]) / 3]);
+        // Plain wall from the band below the windows (no windows up in the gable).
+        const plain = (p: Vec3): [number, number] => [p[0] / 8, 0.8 + (ridgeZ - p[2]) * 0.05];
+        face(wm, [at(r[1]), at(r[2]), wallRidge(1)], plain);
+        face(wm, [at(r[3]), at(r[0]), wallRidge(-1)], plain);
       }
       // Soffits: under the overhang, from the top of the wall out to the roof's edge, facing down.
       const sm = soffits.next(16);
