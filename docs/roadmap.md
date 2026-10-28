@@ -23,8 +23,12 @@ Rough priority order. Each chunk is a self-contained change.
 7. ~~CSP night lighting, CSP Grass FX on lawns and strips, bicycle
    symbols, fences/walls/hedges from OSM, solid tree trunks, no-trace zones
    from the map.~~ Done.
-8. **Close-range ground without CSP.** A grass detail texture through AC's
-   detail-map shader; its parameters need checking in game first.
+8. ~~Close-range detail without CSP~~: detail-mapped road and ground
+   (ksPerPixelMultiMap, set up from the shader source). ~~CSP rain, lit
+   windows, light pollution, shadow fixes~~. Done; see
+   [realism.md](realism.md). Next from that research: a CSP tree list for
+   instanced 3D trees, ksMultilayer terrain (grass, dirt, gravel, concrete
+   by mask), normal maps for the road and walls.
 9. **Scenery.** Multi-lane roundabouts, front fences where OSM has none
    (read off the photo), house windows lit at night.
 
