@@ -41,6 +41,8 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 25 | Power poles stand on the nature strip, not the road; wires sag between them without flickering badly up close; street lights reach out over the road | `utilities.ts`, `WIRES_*` draw distance in `cull.ts` |
 | 26 | Footpaths and driveway slabs sit just proud of the grass (no gaps, no floating); the kerb dips at each driveway and the car rolls over a layback gently | `1STREET_PATH_*`, `1STREET_DRIVE_*`, `LAYBACK` in `kerbs.ts` |
 | 27 | Houses have eaves with white soffits, doors and garage doors on the street side, windows at sill height (none cut off by the ground) | `buildBuildings` in `buildings.ts` |
+| 28 | With CSP and night time: street lights light the road in pools beneath them and the lanterns glow; off by day | `extension/ext_config.ini`, `nightLights.ts` |
+| 29 | Running wide into a tree or a fence stops the car; nothing solid on the road | `1WALL_TREE_*`, `1WALL_FENCE_*` |
 | 24 | A replay switches between trackside cameras that follow the car (not stuck on the chase cam), none inside a building or the ground | `data/cameras_1.ini`, `cameras.ts` |
 
 ## Known unknowns

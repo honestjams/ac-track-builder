@@ -47,6 +47,7 @@ describe("buildTrack (synthetic terrain)", async () => {
       "test_hairpin/data/cameras_1.ini",
       "test_hairpin/data/map.ini",
       "test_hairpin/data/surfaces.ini",
+      "test_hairpin/extension/ext_config.ini",
       "test_hairpin/map.png",
       "test_hairpin/test_hairpin.kn5",
       "test_hairpin/ui/outline.png",

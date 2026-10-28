@@ -29,6 +29,7 @@ import {
 import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, pointInRing, type Building } from "./buildings";
 import { camerasIni, placeCameras } from "./cameras";
 import { cullable } from "./cull";
+import { extConfig } from "./nightLights";
 import { buildBarriers } from "./fences";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
@@ -839,6 +840,7 @@ export async function buildTrack(
     [`${slug}/data/surfaces.ini`]: enc.encode(surfacesIni()),
     [`${slug}/data/map.ini`]: enc.encode(map.ini),
     [`${slug}/data/cameras_1.ini`]: enc.encode(camerasIni(cameras)),
+    [`${slug}/extension/ext_config.ini`]: enc.encode(extConfig(utilities.lights)),
     [`${slug}/map.png`]: map.png,
     [`${slug}/ui/ui_track.json`]: enc.encode(uiTrackJson(trackMeta, {
       length: timedLength(), width: meanWidth, pitboxes: opts.pitCount, closed: plan.closed, centre,
