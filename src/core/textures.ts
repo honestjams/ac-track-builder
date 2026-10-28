@@ -652,3 +652,29 @@ export function windowTexture(): Uint8Array {
     return [sky[0] + (214 - sky[0]) * curtain + n, sky[1] + (204 - sky[1]) * curtain + n, sky[2] + (184 - sky[2]) * curtain + n];
   }), w, h, { alpha: false });
 }
+
+/**
+ * A tangent-space normal map from a texture's brightness taken as height:
+ * on a road, cracks and the edges of patches are darker, so they come out
+ * as grooves that catch the light. DirectX convention (green down), as the
+ * game expects. `strength` is the slope per unit of brightness change per
+ * pixel.
+ */
+export function normalFromHeight(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, strength = 2): Uint8Array {
+  const height = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) height[i] = (rgba[i * 4] + rgba[i * 4 + 1] + rgba[i * 4 + 2]) / (3 * 255);
+  const at = (x: number, y: number) => height[((y + h) % h) * w + ((x + w) % w)];
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * strength, dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+      const l = Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      out[i] = Math.round((-dx / l * 0.5 + 0.5) * 255);
+      out[i + 1] = Math.round((dy / l * 0.5 + 0.5) * 255); // green down: +v is down the image
+      out[i + 2] = Math.round((1 / l * 0.5 + 0.5) * 255);
+      out[i + 3] = 255;
+    }
+  }
+  return out;
+}

@@ -61,3 +61,17 @@ describe("detail-mapped materials", () => {
     expect(mid(4)).toBeGreaterThan(245);
   });
 });
+
+describe("normal maps from height", async () => {
+  const { normalFromHeight } = await import("../src/core/textures");
+  it("is flat where the texture is even, and tilts away from a dark groove", () => {
+    const w = 8, h = 8;
+    const rgba = new Uint8Array(w * h * 4).fill(200);
+    for (let y = 0; y < h; y++) for (const c of [0, 1, 2]) rgba[(y * w + 4) * 4 + c] = 60; // a dark crack down column 4
+    const n = normalFromHeight(rgba, w, h, 2);
+    const px = (x: number, y: number) => [n[(y * w + x) * 4], n[(y * w + x) * 4 + 1], n[(y * w + x) * 4 + 2]];
+    expect(px(1, 2)).toEqual([128, 128, 255]); // flat: straight up
+    expect(px(3, 2)[0]).toBeGreaterThan(140); // left wall of the groove faces +x (toward the crack)...
+    expect(px(5, 2)[0]).toBeLessThan(116); // ...and the right wall faces -x
+  });
+});

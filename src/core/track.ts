@@ -22,7 +22,7 @@ import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1, encodeDdsDxt5 } from "./dds";
 import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { BARRIERS, barrierTexture, detailTexture, windowTexture, flatNormalTexture, grassAlpha, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { BARRIERS, barrierTexture, detailTexture, normalFromHeight, windowTexture, flatNormalTexture, grassAlpha, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
   buildGuardRails, buildGuidePosts, buildTrees, treeTrunks, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
@@ -518,8 +518,10 @@ export async function buildTrack(
         const rgba = new Uint8Array(tex.rgba);
         for (let i = 3; i < rgba.length; i += 4) rgba[i] = 0;
         textures.push({ name: `${name}.dds`, data: encodeDdsDxt5(rgba, tex.width, tex.height) });
+        // Cracks and patch edges as relief, from the seal texture's own shading.
+        textures.push({ name: `${name}_nm.dds`, data: encodeDdsDxt1(normalFromHeight(tex.rgba, tex.width, tex.height, 3), tex.width, tex.height) });
         materials.push(multiMapMaterial(name, `${name}.dds`, light, {
-          normal: "flat_nm.png", maps: "maps_asphalt.png", detail: `detail_${kind}.png`, detailUV: 9, sunSpecular: 0.15,
+          normal: `${name}_nm.dds`, maps: "maps_asphalt.png", detail: `detail_${kind}.png`, detailUV: 9, sunSpecular: 0.15,
         }));
       } else {
         textures.push({ name: `${name}.dds`, data: tex.dds });
