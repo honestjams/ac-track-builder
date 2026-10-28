@@ -17,6 +17,7 @@ const DRAW_DISTANCE: [RegExp, number][] = [
   [/^(MARKINGS|RRPM)/, 450],
   [/^FURNITURE/, 600],
   [/^(GUIDEPOSTS|RAILPOSTS)/, 500],
+  [/^WIRES/, 350], // a few centimetres thick: they only shimmer further off
 ];
 
 /** Half the diagonal of a mesh's bounding box, metres. */

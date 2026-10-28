@@ -128,6 +128,17 @@ interface OverpassWay {
   type: string;
   tags?: Record<string, string>;
   geometry?: { lat: number; lon: number }[];
+  /** Nodes only. */
+  lat?: number;
+  lon?: number;
+}
+
+/** A street's power line, on poles: minor_line, or line at distribution voltage (not towers). */
+function onPoles(tags: Record<string, string>): boolean {
+  if (tags.power === "minor_line") return true;
+  if (tags.power !== "line") return false;
+  const volts = (tags.voltage ?? "").split(";").map(Number).filter((v) => v > 0);
+  return volts.length > 0 && Math.max(...volts) <= 33000;
 }
 
 export interface OsmData {
@@ -150,6 +161,9 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     way(around:12,${around})[highway];
     way(around:15,${around})[barrier=guard_rail];
     way(around:30,${around})[junction~"^(roundabout|circular)$"];
+    node(around:40,${around})[power=pole];
+    node(around:40,${around})[highway=street_lamp];
+    way(around:40,${around})[power~"^(line|minor_line)$"];
   );out tags geom;`;
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 45000);
@@ -159,7 +173,7 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
       const r = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }), signal: ctl.signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const body = await r.json();
-      return ((body.elements ?? []) as OverpassWay[]).filter((e) => e.type === "way" && e.geometry);
+      return ((body.elements ?? []) as OverpassWay[]).filter((e) => (e.type === "way" && e.geometry) || (e.type === "node" && e.lat !== undefined));
     }));
   } catch {
     // every mirror failed
@@ -167,14 +181,21 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     clearTimeout(timer);
     ctl.abort();
   }
-  const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [] };
+  const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [], poles: [], lamps: [], powerLines: [] };
   if (!elements) return { features };
 
   const ways: Way[] = [];
   for (const e of elements) {
     const tags = e.tags ?? {};
+    if (e.type === "node") {
+      if (tags.power === "pole") features.poles!.push([e.lon!, e.lat!]);
+      else if (tags.highway === "street_lamp") features.lamps!.push([e.lon!, e.lat!]);
+      continue;
+    }
     const pts = e.geometry!.map((g) => [g.lon, g.lat] as LngLat);
-    if (tags.junction === "roundabout" || tags.junction === "circular") {
+    if (tags.power === "line" || tags.power === "minor_line") {
+      if (onPoles(tags)) features.powerLines!.push(pts);
+    } else if (tags.junction === "roundabout" || tags.junction === "circular") {
       features.roundaboutRings!.push(pts);
     } else if (tags.barrier === "guard_rail") {
       features.guardRails.push(pts);

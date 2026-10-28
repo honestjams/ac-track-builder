@@ -537,6 +537,7 @@ function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<Imag
     ["Side streets", `${s.sideStreets.toLocaleString()} (${s.sideTraced} traced)`],
     ["Kerb & gutter", `${(s.kerbMetres / 1000).toFixed(2)} km`],
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
+    ["Poles & lights", `${s.poles} power poles, ${s.streetLights} street lights`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
     ["Triangles", s.triangles.toLocaleString()],
   ];

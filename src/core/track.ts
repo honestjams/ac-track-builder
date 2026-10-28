@@ -31,7 +31,8 @@ import { camerasIni, placeCameras } from "./cameras";
 import { cullable } from "./cull";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
-import { buildPieces, gateSigns, landmarks, seenFeatures, streetSigns } from "./furniture";
+import { buildPieces, gateSigns, landmarks, mergeSightings, seenFeatures, streetSigns } from "./furniture";
+import { placeUtilities } from "./utilities";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, displayOf, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, streetSurface, type StreetLine, type StreetName } from "./sideStreets";
@@ -79,6 +80,10 @@ export interface OsmFeatures {
   guardRails: LngLat[][];
   /** OSM junction=roundabout ways near the route. */
   roundaboutRings?: LngLat[][];
+  /** Power poles, street lamps and distribution power lines (on poles) near the route. */
+  poles?: LngLat[];
+  lamps?: LngLat[];
+  powerLines?: LngLat[][];
 }
 
 export interface TrackResult {
@@ -118,6 +123,9 @@ export interface TrackResult {
     sideTraced: number;
     /** Kerb and gutter built, metres (both sides counted). */
     kerbMetres: number;
+    /** Power poles and street lights placed. */
+    poles: number;
+    streetLights: number;
     streetSigns: number;
     signs: number;
     railMetres: number;
@@ -335,6 +343,7 @@ export async function buildTrack(
   addScenery("lamp.png", solidTexture([150, 152, 150]), material("lamp", "lamp.png", { ambient: 0.45, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("signal.png", solidTexture([28, 30, 26]), material("signal", "signal.png", { ambient: 0.4, diffuse: 0.4, specular: 0.2, exp: 20 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
+  addScenery("wire.png", solidTexture([38, 38, 40]), material("wire", "wire.png", { ambient: 0.35, diffuse: 0.35, specular: 0.2, exp: 20 }));
   addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("concrete.png", concreteTexture(), material("concrete", "concrete.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
   addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
@@ -460,23 +469,23 @@ export async function buildTrack(
   // Kerb and gutter: read off the photo where the road was traced; in town
   // they are the rule, so there it takes little evidence (or none, under canopy).
   const nS = plan.samples.length;
+  // How built-up it is around each sample (checked every 10 m): 2 = town
+  // (dense houses or a street grid), 1 = edge of town, 0 = country.
+  // Motorways never count. Only real streets count, not driveways and tracks.
+  const streets = streetPlan.streets.filter((st) => /^(primary|secondary|tertiary|minor)/.test(st.cls));
+  const town: number[] = [];
+  plan.samples.forEach((s, i) => {
+    if (i % 5) return town.push(town[i - 1]);
+    const near = (r: number) => ([x, y]: Vec2) => Math.hypot(x - s.pos[0], y - s.pos[1]) < r;
+    const cls = sources.roadClassAt?.(proj.toLngLat(s.pos)) ?? "";
+    if (/^(motorway|trunk)/.test(cls)) return town.push(0);
+    const houses = centres.filter(near(150)).length, grid = streets.filter((st) => st.pts.some(near(120))).length;
+    town.push(houses >= 20 || grid >= 5 ? 2 : houses >= 8 || grid >= 3 ? 1 : 0);
+  });
   let kerbs: [number[], number[]] = [new Array(nS).fill(0), new Array(nS).fill(0)];
   if (opts.kerbs) {
     const tr = trace;
     const evidence = raster && tr ? kerbEvidence(plan, raster, (i) => tr.conf[i] > 0.7) : null;
-    // How built-up it is around each sample (checked every 10 m): 2 = town
-    // (dense houses or a street grid), 1 = edge of town, 0 = country.
-    // Motorways never count. Only real streets count, not driveways and tracks.
-    const streets = streetPlan.streets.filter((st) => /^(primary|secondary|tertiary|minor)/.test(st.cls));
-    const town: number[] = [];
-    plan.samples.forEach((s, i) => {
-      if (i % 5) return town.push(town[i - 1]);
-      const near = (r: number) => ([x, y]: Vec2) => Math.hypot(x - s.pos[0], y - s.pos[1]) < r;
-      const cls = sources.roadClassAt?.(proj.toLngLat(s.pos)) ?? "";
-      if (/^(motorway|trunk)/.test(cls)) return town.push(0);
-      const houses = centres.filter(near(150)).length, grid = streets.filter((st) => st.pts.some(near(120))).length;
-      town.push(houses >= 20 || grid >= 5 ? 2 : houses >= 8 || grid >= 3 ? 1 : 0);
-    });
     // A kerb must never stand on anything drivable: none across a side
     // street's mouth, on the inside of a turn too tight for the strip (it
     // would fold over onto the road), or anywhere its gutter, kerb or strip
@@ -725,6 +734,14 @@ export async function buildTrack(
     const n = index.nearest(x, y, opts.corridor - 1);
     return n ? ground(x, y) : backdropHeight(farDem, index, opts, x, y) - 0.6;
   };
+  // Power poles, wires and street lights: seen, mapped, or (lights, in town) at a typical spacing.
+  const seenLocal = mergeSightings((sources.seen ?? []).map((f) => ({ ...f, at: proj.toLocal(f.at) })));
+  const osmLocal = (pts?: LngLat[]) => (pts ?? []).map((p) => proj.toLocal(p));
+  const utilities = placeUtilities({
+    poles: [...seenLocal.filter((f) => /^object--support--utility-pole/.test(f.value)).map((f) => f.at), ...osmLocal(sources.osm?.poles)],
+    lamps: [...seenLocal.filter((f) => /^object--street-light/.test(f.value)).map((f) => f.at), ...osmLocal(sources.osm?.lamps)],
+    lines: (sources.osm?.powerLines ?? []).map(osmLocal),
+  }, plan, index, opts, (i) => town[i], (x, y) => streetIndex.clearance(x, y) < 1 || kept.some((b) => pointInRing(x, y, b.ring)));
   // Signs and street furniture; their artwork is drawn in one atlas.
   const art = new ArtList();
   const pieces = [
@@ -733,6 +750,7 @@ export async function buildTrack(
       (x, y) => Math.min(streetIndex.clearance(x, y), ...kept.map((b) => (pointInside(x, y, b.ring) ? -1 : Infinity)))) : []),
     ...seenFeatures((sources.seen ?? []).map((f) => ({ ...f, at: proj.toLocal(f.at) })), plan, index, opts, art),
     ...gateSigns(plan, opts, art),
+    ...utilities.pieces,
   ];
   let atlas = null;
   if (sources.renderArt && art.list.length) {
@@ -760,6 +778,7 @@ export async function buildTrack(
         group("ROAD", roadMeshes.road),
         group("SIDESTREETS", sideStreets),
         group("FURNITURE", furniture),
+        group("WIRES", utilities.wires),
         group("ROUNDABOUTS", [...ringsClear.nodes, ...shrubs, ...ringWalls]),
         group("MARKINGS", markings),
         group("VERGE", roadMeshes.verge),
@@ -830,6 +849,8 @@ export async function buildTrack(
       sideStreets: streetPlan.streets.length,
       sideTraced,
       kerbMetres: (kerbs[0].reduce((a, b) => a + b, 0) + kerbs[1].reduce((a, b) => a + b, 0)) * opts.spacing,
+      poles: utilities.poles,
+      streetLights: utilities.lights.length,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,
       railMetres: needs.reduce((n, side) => n + side.filter(Boolean).length * opts.spacing, 0),

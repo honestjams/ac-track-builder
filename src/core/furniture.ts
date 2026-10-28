@@ -1,7 +1,7 @@
 // Street furniture: street name signs at junctions, signs for shops and
 // landmarks (from OSM points of interest), bus stops, servo canopies, and
-// whatever street-level imagery (Mapillary) has seen: traffic signs, power
-// poles, street lights and traffic lights.
+// whatever street-level imagery (Mapillary) has seen: traffic signs and
+// traffic lights. Power poles and street lights are in utilities.ts.
 //
 // Placement produces a list of simple pieces first (posts, boxes, sign
 // faces), so the sign artwork can be requested and drawn in one go before
@@ -29,7 +29,7 @@ export type Piece =
 const facingTraffic = (s: RoadSample, side: 1 | -1): Vec2 => [-s.tan[0] * side, -s.tan[1] * side];
 
 /** Height of the verge surface at lateral offset t (outside the asphalt). */
-function vergeZ(s: RoadSample, t: number, opts: BuildOptions): number {
+export function vergeZ(s: RoadSample, t: number, opts: BuildOptions): number {
   const side = t >= 0 ? 1 : -1;
   const half = s.width / 2;
   const f = Math.min(1, Math.max(0, (Math.abs(t) - half) / Math.max(0.1, opts.vergeWidth)));
@@ -47,7 +47,7 @@ function sampleAt(plan: RoadPlan, s: number): number {
   return lo;
 }
 
-const off = (s: RoadSample, t: number): Vec2 => [s.pos[0] + s.left[0] * t, s.pos[1] + s.left[1] * t];
+export const off = (s: RoadSample, t: number): Vec2 => [s.pos[0] + s.left[0] * t, s.pos[1] + s.left[1] * t];
 
 /* ---------------- street name signs ---------------- */
 
@@ -237,6 +237,7 @@ export function seenFeatures(features: SeenFeature[], plan: RoadPlan, index: Seg
   art.add({ key: "back", kind: "back" });
   for (const f of mergeSightings(features)) {
     if (/^marking--/.test(f.value)) continue; // painted on the road: see markings
+    if (/^object--(support--utility-pole|street-light)/.test(f.value)) continue; // see utilities.ts
 
     const n = index.nearest(f.at[0], f.at[1], opts.corridor - 2);
     if (!n) continue;
@@ -248,21 +249,7 @@ export function seenFeatures(features: SeenFeature[], plan: RoadPlan, index: Seg
     const t = onRoad ? side * (half + opts.vergeWidth * 0.7) : n.t;
     const at = onRoad ? off(s, t) : f.at;
     const z = Math.abs(t) < half + opts.vergeWidth + 0.5 ? vergeZ(s, t, opts) : surfaceHeight(s, side * half, opts.crown) - 0.2;
-    const across: Vec2 = [s.left[0] * side, s.left[1] * side]; // away from the road
 
-    if (/^object--support--utility-pole/.test(f.value)) {
-      out.push({ kind: "box", at, along: s.tan, length: 0.3, depth: 0.3, z0: z - 1, z1: z + 10.5, material: "timber" });
-      out.push({ kind: "box", at, along: s.tan, length: 2.4, depth: 0.12, z0: z + 9.7, z1: z + 9.85, material: "timber" });
-      continue;
-    }
-    if (/^object--street-light/.test(f.value)) {
-      out.push({ kind: "box", at, along: s.tan, length: 0.2, depth: 0.2, z0: z - 0.6, z1: z + 8.5, material: "steel" });
-      // Outreach arm over the road, with the lantern on its end.
-      const tip: Vec2 = [at[0] - across[0] * 2, at[1] - across[1] * 2];
-      out.push({ kind: "box", at: [at[0] - across[0], at[1] - across[1]], along: [-across[1], across[0]], length: 0.08, depth: 2, z0: z + 8.3, z1: z + 8.4, material: "steel" });
-      out.push({ kind: "box", at: tip, along: s.tan, length: 0.35, depth: 0.7, z0: z + 8.1, z1: z + 8.3, material: "lamp" });
-      continue;
-    }
     if (/^object--traffic-light/.test(f.value)) {
       out.push({ kind: "box", at, along: s.tan, length: 0.14, depth: 0.14, z0: z - 0.4, z1: z + 3.5, material: "steel" });
       const head: Vec2 = [at[0] + facingTraffic(s, side)[0] * 0.2, at[1] + facingTraffic(s, side)[1] * 0.2];
