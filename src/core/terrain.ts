@@ -61,9 +61,9 @@ export function makeTerrainFn(plan: RoadPlan, index: SegmentIndex, dem: HeightFn
       const d = Math.hypot(x - rb.c[0], y - rb.c[1]);
       const edge = outerRadius(rb) + opts.vergeWidth;
       if (d > edge + opts.terrainBlend) continue;
-      if (d <= edge) return { h: ringHeight(rb, Math.min(d, outerRadius(rb))) - opts.terrainUnderRoad, dist: Math.min(fromRoad.dist, 0) };
-      if (fromRoad.dist <= fromRoad.inner) return fromRoad;
       const base = ringHeight(rb, outerRadius(rb)) - BELOW_VERGE + (rb.kerbed ? BELOW_VERGE + KERB_H - 0.03 : 0);
+      if (d <= edge) return { h: underRoad(ringHeight(rb, Math.min(d, outerRadius(rb))), base, edge - d, opts), dist: Math.min(fromRoad.dist, 0) };
+      if (fromRoad.dist <= fromRoad.inner) return fromRoad;
       const f = smoothstep((d - edge) / opts.terrainBlend);
       const h = base + (dem(x, y) - base) * f;
       // Blend toward whichever feature pulls the ground further from the DEM.
@@ -72,6 +72,18 @@ export function makeTerrainFn(plan: RoadPlan, index: SegmentIndex, dem: HeightFn
     }
     return fromRoad;
   };
+}
+
+/**
+ * Ground under the road, verges and kerbs: dropped below them so it never
+ * pokes through, rising in a straight line over the last two grid cells to meet
+ * the ground beyond. A full drop right up to the edge would drag the grid's
+ * next cell down with it, a ditch along the road; a straight ramp is exactly
+ * what the grid draws, so the ground lands where it is meant to.
+ */
+function underRoad(surface: number, beyond: number, fromEdge: number, opts: BuildOptions): number {
+  const k = Math.min(1, Math.max(0, fromEdge) / (2 * opts.terrainStep));
+  return beyond + (surface - opts.terrainUnderRoad - beyond) * k;
 }
 
 function roadTerrain(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: BuildOptions, lastSeg: number) {
@@ -86,8 +98,8 @@ function roadTerrain(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: B
     const tc = Math.max(-half, Math.min(half, n.t));
     const edge = v.h + v.bank * tc - opts.crown * Math.abs(tc);
     const beyondEnd = !plan.closed && ((n.seg === 0 && n.frac === 0) || (n.seg === lastSeg && n.frac === 1));
-    if (!beyondEnd && n.dist <= inner) return { h: edge - opts.terrainUnderRoad, dist: n.dist, inner };
     const base = edge - BELOW_VERGE + (BELOW_VERGE + KERB_H - 0.03) * v.kerb;
+    if (!beyondEnd && n.dist <= inner) return { h: underRoad(edge, base, inner - n.dist, opts), dist: n.dist, inner };
     const f = smoothstep((n.dist - inner) / opts.terrainBlend);
     return { h: base + (ground - base) * f, dist: n.dist, inner };
   };

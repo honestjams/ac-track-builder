@@ -21,10 +21,9 @@ export interface BuildOptions {
   /** Terrain grid spacing, metres. */
   terrainStep: number;
   /**
-   * How far the terrain under the road and verges is dropped below them, metres,
-   * so it never pokes through. On a coarse grid the drop drags the ground
-   * beside the road down with it (a ditch at the edge); on flat ground use a
-   * finer terrainStep and a small drop.
+   * How far the terrain under the road is dropped below it, metres, so it
+   * never pokes through. It rises back over the two grid cells nearest the
+   * edge, so the ground beyond the verge or kerb isn't dragged down.
    */
   terrainUnderRoad: number;
   /** Distance over which terrain blends from the road level to the real ground, metres. */
