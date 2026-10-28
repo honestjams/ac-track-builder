@@ -223,6 +223,7 @@ async function doRoute(): Promise<void> {
   err.hidden = true;
   current = null;
   updateBuildButton();
+  $("route-note").hidden = true;
   if (pins.length < 2) {
     routeLine?.remove();
     routeLine = null;
@@ -250,6 +251,11 @@ async function doRoute(): Promise<void> {
       err.textContent = "Make the road at least 300 m long.";
       err.hidden = false;
     }
+    const note = $("route-note");
+    note.hidden = !r.trimmed.length;
+    note.textContent = r.trimmed.length
+      ? `Cut ${r.trimmed.length === 1 ? "a U-turn" : `${r.trimmed.length} U-turns`} out of the route (a pin on the far side of the road). Drag the pin onto the near side to keep it exact.`
+      : "";
     if (r.uturns.length && err.hidden) {
       const [lng, lat] = r.uturns[0];
       err.textContent = `The route turns back on itself near ${lat.toFixed(5)}, ${lng.toFixed(5)}, which builds a hairpin spike. Move or remove the pin there.`;

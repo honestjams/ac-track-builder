@@ -2,7 +2,8 @@
 // (Overpass). All keyless public services; the browser's Referer identifies
 // the app, as their usage policies ask.
 
-import type { LngLat } from "../core/geo";
+import { haversine, type LngLat } from "../core/geo";
+import { trimSpurs } from "../core/spurs";
 import type { OsmFeatures } from "../core/track";
 import type { RoundaboutHint } from "../core/roundabout";
 
@@ -20,8 +21,10 @@ export interface Route {
   distance: number;
   /** Where the route goes round a roundabout, with the arc it drives. */
   roundabouts: RoundaboutHint[];
-  /** Where the route turns back on itself (usually a pin snapped to the wrong side of the road). */
+  /** Where the route still turns back on itself (usually a pin snapped to the wrong side of the road). */
   uturns: LngLat[];
+  /** U-turn spurs cut out of the route. */
+  trimmed: LngLat[];
 }
 
 interface OsrmStep {
@@ -42,7 +45,18 @@ export async function route(pins: LngLat[], signal?: AbortSignal): Promise<Route
     .filter((st) => /^(roundabout|rotary|roundabout turn)$/.test(st.maneuver.type))
     .map((st) => ({ location: st.maneuver.location, arc: st.geometry.coordinates }));
   const uturns = steps.filter((st) => st.maneuver.modifier === "uturn").map((st) => st.maneuver.location);
-  return { coords: body.routes[0].geometry.coordinates, distance: body.routes[0].distance, roundabouts, uturns };
+  const coords: LngLat[] = body.routes[0].geometry.coordinates;
+  const t = trimSpurs(coords, uturns);
+  if (!t.cut.length) return { coords, distance: body.routes[0].distance, roundabouts, uturns, trimmed: [] };
+  // A roundabout the route only went round to turn back is gone with the spur.
+  const near = (p: LngLat) => t.coords.some((c) => haversine(c, p) < 30);
+  return {
+    coords: t.coords,
+    distance: t.coords.slice(1).reduce((d, c, i) => d + haversine(t.coords[i], c), 0),
+    roundabouts: roundabouts.filter((rb) => near(rb.location)),
+    uturns: t.kept,
+    trimmed: t.cut,
+  };
 }
 
 export interface Place {
