@@ -136,7 +136,41 @@ function removePin(i: number): void {
   refreshRoute();
 }
 
+// No-trace zones: where the photo trace goes wrong, the road keeps its mapped line.
+const ZONE_RADIUS = 60;
+let zoneMode = false;
+let zones: { at: LngLat; circle: L.Circle }[] = [];
+function renderZones(): void {
+  const hint = $("zones-hint");
+  hint.hidden = !zones.length && !zoneMode;
+  hint.textContent = zoneMode
+    ? "Click the map to place it."
+    : `${zones.length} no-trace ${zones.length === 1 ? "zone" : "zones"}: click one to remove it.`;
+  $("add-zone").setAttribute("aria-pressed", String(zoneMode));
+}
+function addZone(at: LngLat): void {
+  const circle = L.circle([at[1], at[0]], { radius: ZONE_RADIUS, color: "#e0457b", weight: 2, fillOpacity: 0.12 }).addTo(map);
+  const zone = { at, circle };
+  circle.on("click", (ev: L.LeafletMouseEvent) => {
+    L.DomEvent.stopPropagation(ev);
+    circle.remove();
+    zones = zones.filter((z) => z !== zone);
+    renderZones();
+  });
+  zones.push(zone);
+  renderZones();
+}
+$("add-zone").onclick = () => {
+  zoneMode = !zoneMode;
+  renderZones();
+};
+
 map.on("click", (e: L.LeafletMouseEvent) => {
+  if (zoneMode) {
+    zoneMode = false;
+    addZone([e.latlng.lng, e.latlng.lat]);
+    return;
+  }
   pins.push([e.latlng.lng, e.latlng.lat]);
   renderPins();
   refreshRoute();
@@ -149,6 +183,9 @@ $("reverse").onclick = () => {
 };
 $("clear").onclick = () => {
   pins = [];
+  zones.forEach((z) => z.circle.remove());
+  zones = [];
+  renderZones();
   renderPins();
   refreshRoute();
 };
@@ -342,6 +379,7 @@ function readOptions(): Partial<BuildOptions> {
     landmarks: $<HTMLInputElement>("landmarks").checked,
     traceRoads: $<HTMLInputElement>("traceRoads").checked,
     kerbs: $<HTMLInputElement>("kerbs").checked,
+    noTrace: zones.map((z) => ({ at: z.at, radius: ZONE_RADIUS })),
   };
 }
 

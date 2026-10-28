@@ -15,7 +15,8 @@ everything runs client-side: no server, no account, no queue.
   circuit).
 - The road traced from the aerial photos: where the asphalt can be seen,
   the road follows its real line and width (OSM is often a metre or two
-  off); under tree canopy it falls back to OpenStreetMap.
+  off); under tree canopy it falls back to OpenStreetMap. Where the trace
+  goes wrong, a "No-trace zone" on the map keeps the mapped line there.
 - Line markings read off the photos (lane lines, edge lines, dashed or
   solid, in phase with the real ones), generated from sight distance where
   the photos can't show them.

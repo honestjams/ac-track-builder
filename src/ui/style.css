@@ -72,6 +72,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 button:not(:disabled):hover, .button:hover { border-color: #444b5a; }
 .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 650; }
 .primary:not(:disabled):hover { filter: brightness(1.06); border-color: var(--accent); }
+button[aria-pressed="true"] { border-color: #e0457b; box-shadow: inset 0 0 0 1px #e0457b; }
 #build { padding: 11px; font-size: 15px; }
 
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
