@@ -659,7 +659,7 @@ export async function buildTrack(
   }
   // Painted marks street-level imagery located: snapped to the road at their distance along it.
   const discreteMarks = (): DiscreteMark[] => (sources.seen ?? []).flatMap((f): DiscreteMark[] => {
-    const m = /^marking--discrete--(stop-line|give-way|crosswalk-zebra|arrow--([a-z-]+)|text--(\d+))/.exec(f.value);
+    const m = /^marking--discrete--(stop-line|give-way|crosswalk-zebra|arrow--([a-z-]+)|text--([a-z0-9-]+))/.exec(f.value);
     if (!m) return [];
     const p = proj.toLocal(f.at);
     const n = index.nearest(p[0], p[1], 15);

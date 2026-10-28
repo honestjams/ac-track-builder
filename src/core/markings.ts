@@ -445,18 +445,61 @@ const DIGITS: Record<string, [number, number][][]> = {
   "9": [[[1, 0.5], [0, 0.5], [0, 1], [1, 1], [1, 0], [0, 0]]],
 };
 
-/** Painted numbers (speed limits, school zones): 3 m tall elongated digits. */
+/** Stroke letters in a unit box (x right, y up = away from the driver). */
+const LETTERS: Record<string, [number, number][][]> = {
+  A: [[[0, 0], [0.5, 1], [1, 0]], [[0.2, 0.4], [0.8, 0.4]]],
+  B: [[[0, 0], [0, 1], [0.8, 1], [1, 0.85], [1, 0.62], [0.8, 0.5], [0, 0.5]], [[0.8, 0.5], [1, 0.38], [1, 0.12], [0.8, 0], [0, 0]]],
+  C: [[[1, 1], [0, 1], [0, 0], [1, 0]]],
+  D: [[[0, 0], [0, 1], [0.65, 1], [1, 0.7], [1, 0.3], [0.65, 0], [0, 0]]],
+  E: [[[1, 1], [0, 1], [0, 0], [1, 0]], [[0, 0.5], [0.75, 0.5]]],
+  F: [[[1, 1], [0, 1], [0, 0]], [[0, 0.5], [0.75, 0.5]]],
+  G: [[[1, 1], [0, 1], [0, 0], [1, 0], [1, 0.5], [0.5, 0.5]]],
+  H: [[[0, 0], [0, 1]], [[1, 0], [1, 1]], [[0, 0.5], [1, 0.5]]],
+  I: [[[0.5, 0], [0.5, 1]]],
+  J: [[[1, 1], [1, 0], [0, 0], [0, 0.3]]],
+  K: [[[0, 0], [0, 1]], [[1, 1], [0, 0.45], [1, 0]]],
+  L: [[[0, 1], [0, 0], [1, 0]]],
+  M: [[[0, 0], [0, 1], [0.5, 0.5], [1, 1], [1, 0]]],
+  N: [[[0, 0], [0, 1], [1, 0], [1, 1]]],
+  O: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+  P: [[[0, 0], [0, 1], [1, 1], [1, 0.5], [0, 0.5]]],
+  R: [[[0, 0], [0, 1], [1, 1], [1, 0.5], [0, 0.5], [1, 0]]],
+  S: [[[1, 1], [0, 1], [0, 0.5], [1, 0.5], [1, 0], [0, 0]]],
+  T: [[[0, 1], [1, 1]], [[0.5, 1], [0.5, 0]]],
+  U: [[[0, 1], [0, 0], [1, 0], [1, 1]]],
+  V: [[[0, 1], [0.5, 0], [1, 1]]],
+  W: [[[0, 1], [0.25, 0], [0.5, 0.6], [0.75, 0], [1, 1]]],
+  X: [[[0, 0], [1, 1]], [[0, 1], [1, 0]]],
+  Y: [[[0, 1], [0.5, 0.5], [1, 1]], [[0.5, 0.5], [0.5, 0]]],
+  Z: [[[0, 1], [1, 1], [0, 0], [1, 0]]],
+};
+
+/**
+ * Painted numbers and words (speed limits, SLOW, BUS, SCHOOL, KEEP CLEAR):
+ * elongated characters 3 m tall, squeezed to fit a lane. Words separated by
+ * "-" stack along the road, the first nearest the driver.
+ */
 export function textGlyph(text = ""): Glyph | null {
-  const chars = [...text].filter((ch) => DIGITS[ch]);
-  if (!chars.length || chars.length > 3) return null;
-  const H = 3, W = 0.75, gap = 0.35;
-  const total = chars.length * W + (chars.length - 1) * gap;
+  const words = text.toUpperCase().split(/[-\s]+/).filter(Boolean);
+  if (!words.length || words.length > 2) return null;
+  const strokes = (ch: string) => DIGITS[ch] ?? LETTERS[ch];
+  if (words.some((w) => w.length > 8 || [...w].some((ch) => !strokes(ch)))) return null;
+  const H = 3, rowGap = 1.5, LANE = 2.8;
   const lines: [number, number][][] = [];
-  chars.forEach((ch, k) => {
-    const x0 = k * (W + gap);
-    for (const pl of DIGITS[ch]) lines.push(pl.map(([x, y]) => [y * H, total / 2 - (x0 + x * W)]));
+  let narrowest = 0.75;
+  words.forEach((word, row) => {
+    const chars = [...word];
+    const gap = /^\d+$/.test(word) ? 0.35 : 0.2;
+    const W = Math.min(0.75, (LANE - gap * (chars.length - 1)) / chars.length);
+    narrowest = Math.min(narrowest, W);
+    const total = chars.length * W + (chars.length - 1) * gap;
+    const y0 = row * (H + rowGap);
+    chars.forEach((ch, k) => {
+      const x0 = k * (W + gap);
+      for (const pl of strokes(ch)) lines.push(pl.map(([x, y]) => [y0 + y * H, total / 2 - (x0 + x * W)]));
+    });
   });
-  return { lines, heads: [], width: 0.18, length: H };
+  return { lines, heads: [], width: narrowest < 0.5 ? 0.12 : 0.18, length: H * words.length + rowGap * (words.length - 1) };
 }
 
 /** A 100 x 100 x 20 mm marker on the centreline. */
