@@ -67,3 +67,41 @@ describe("terrain beside the road", () => {
     });
   }
 });
+
+describe("terrain at a roundabout mouth", () => {
+  // A kerbed 8 m road running straight into a kerbed ring centred on it: the ground under the
+  // mouth must stay below the road, not ramp up toward kerb height (a lip at every entry).
+  const path: Vec2[] = Array.from({ length: 16 }, (_, i) => [i * 20, 0.3]);
+  const opts = withDefaults({ widthOverride: 8, terrainStep: 1.5, terrainUnderRoad: 0.12 });
+  for (const step of [1.5, 3]) {
+    it(`keeps the ground under the arm where it meets the ring (${step} m grid)`, () => {
+      const o = { ...opts, terrainStep: step };
+      const plan = planRoad(path, o);
+      plan.samples.forEach((s) => {
+        s.h = 10;
+        s.kerb = [1, 1];
+      });
+      const c: Vec2 = [150, 0.3];
+      const span = 0.5;
+      plan.roundabouts.push({ c, r: 12, w: 8, hc: 10, sIn: 0, sOut: 0, crossings: [0, Math.PI], kerbed: true, openings: [[-span, span], [Math.PI - span, Math.PI + span]] });
+      const terrain = makeTerrainFn(plan, new SegmentIndex(plan), () => 10 + KERB_H, o);
+      const mesh = meshAt(terrain, step);
+      let poke = -Infinity;
+      for (let x = 150 + 15.5; x < 150 + 22; x += 0.1) {
+        for (let t = -3.5; t <= 3.5; t += 0.5) poke = Math.max(poke, mesh(x, 0.3 + t) - (10 - o.crown * Math.abs(t)));
+      }
+      expect(poke).toBeLessThan(-0.01);
+      // Nor up through the ring's gutter (0.3 m, falling 3 cm), away from the mouths;
+      // and no deep ditch behind the grass strip.
+      let gutter = -Infinity, ditch = 0;
+      for (let a = 1; a < 2.1; a += 0.01) {
+        const at = (r: number) => mesh(c[0] + Math.cos(a) * r, c[1] + Math.sin(a) * r);
+        const zi = 10 + 0.02 * (12 - 16);
+        for (let r = 16; r <= 16.3; r += 0.02) gutter = Math.max(gutter, at(r) - (zi - 0.1 * (r - 16)));
+        for (let r = 16.1 + Math.max(3, 0.35 + 2 * step); r < 30; r += 0.1) ditch = Math.max(ditch, zi + KERB_H - 0.03 - at(r));
+      }
+      expect(gutter).toBeLessThan(-0.01);
+      expect(ditch).toBeLessThan(0.1);
+    });
+  }
+});

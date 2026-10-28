@@ -202,9 +202,9 @@ function trackObjects(plan: RoadPlan, opts: BuildOptions): Kn5GroupNode[] {
   };
   const place = (name: string, s: number, t: number, lift: number) => {
     const p = along(plan, s, t, lift, opts.crown);
-    // The game takes a dummy's -Z as the way the car faces (with +Z, cars
-    // spawned facing back down the road), so Z points back along the road.
-    out.push(dummy(name, frameTransform(p.pos, [-p.fwd[0], -p.fwd[1], -p.fwd[2]])));
+    // A spawn dummy's Z points the way the car faces, along the AI line. (With Z pointing back
+    // down the road, as upstream had it, the AI's first move in a test run was a U-turn.)
+    out.push(dummy(name, frameTransform(p.pos, p.fwd)));
   };
 
   if (plan.closed) {

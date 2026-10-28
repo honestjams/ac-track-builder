@@ -13,6 +13,7 @@ import type { Kn5MeshNode } from "./kn5";
 import { MeshBuilder } from "./mesh";
 import type { BuildOptions } from "./options";
 import { SEAL_LENGTH } from "./textures";
+import { STRIP_EXTRA } from "./kerbs";
 
 /** What the router reports for one roundabout manoeuvre. */
 export interface RoundaboutHint {
@@ -68,6 +69,13 @@ const MIN_R = 5;
 const MAX_R = 60;
 
 export const outerRadius = (rb: Roundabout) => rb.r + rb.w / 2;
+/**
+ * Outer edge of the ring's verge. Behind a kerb the grass strip runs as wide as a kerbed road's
+ * (verge plus strip), and at least far enough that the ground's ramp up to it starts behind the
+ * gutter and kerb.
+ */
+export const vergeOuterRadius = (rb: Roundabout, opts: BuildOptions) =>
+  outerRadius(rb) + (rb.kerbed ? Math.max(opts.vergeWidth + STRIP_EXTRA, 0.35 + 2 * opts.terrainStep) : opts.vergeWidth);
 export const innerRadius = (rb: Roundabout) => Math.max(1.5, rb.r - rb.w / 2);
 
 /** Ring surface height at radius rho: flat, falling 2% outward. */
@@ -229,7 +237,7 @@ export function buildRingMeshes(rb: Roundabout, k: number, opts: BuildOptions, r
   const gapM = 0.5;
   /** Metres round the outer edge from angle a to the nearest road joining the ring. */
   const toGap = (a: number) => toOpening(rb, Ro, a);
-  const vo = Ro + opts.vergeWidth;
+  const vo = vergeOuterRadius(rb, opts);
   const zi = ringHeight(rb, Ro);
   const kerb: Kn5MeshNode[] = [];
   if (!rb.kerbed) {

@@ -9,7 +9,7 @@ import type { Kn5MeshNode } from "./kn5";
 import { MeshBuilder } from "./mesh";
 import type { BuildOptions } from "./options";
 import type { RoadPlan, SegmentIndex } from "./road";
-import { outerRadius, ringHeight } from "./roundabout";
+import { outerRadius, ringHeight, toOpening, vergeOuterRadius } from "./roundabout";
 import { KERB_H, STRIP_EXTRA } from "./kerbs";
 
 export interface TerrainChunk {
@@ -59,13 +59,25 @@ export function makeTerrainFn(plan: RoadPlan, index: SegmentIndex, dem: HeightFn
     // A roundabout is a level disc; near one, whichever edge is closer wins.
     for (const rb of plan.roundabouts) {
       const d = Math.hypot(x - rb.c[0], y - rb.c[1]);
-      const edge = outerRadius(rb) + opts.vergeWidth;
+      const Ro = outerRadius(rb);
+      const edge = vergeOuterRadius(rb, opts);
       if (d > edge + opts.terrainBlend) continue;
-      const base = ringHeight(rb, outerRadius(rb)) - BELOW_VERGE + (rb.kerbed ? BELOW_VERGE + KERB_H - 0.03 : 0);
-      if (d <= edge) return { h: underRoad(ringHeight(rb, Math.min(d, outerRadius(rb))), base, edge - d, opts), dist: Math.min(fromRoad.dist, 0) };
+      // Where a road joins the ring there is no kerb or verge: the ground stays under the road,
+      // tapering back to kerb height over the same 2 m the kerb mesh does. Without this the
+      // ramp up to the kerb poked through the mouths, a lip at every entry and exit.
+      const open = Math.max(0, Math.min(1, (toOpening(rb, Ro, Math.atan2(y - rb.c[1], x - rb.c[0])) - 0.5) / 2));
+      const sunk = ringHeight(rb, Ro) - opts.terrainUnderRoad;
+      const kerbBase = ringHeight(rb, Ro) - BELOW_VERGE + (rb.kerbed ? BELOW_VERGE + KERB_H - 0.03 : 0);
+      const base = sunk + (kerbBase - sunk) * open;
+      if (d <= edge) {
+        let h = underRoad(ringHeight(rb, Math.min(d, Ro)), base, edge - d, opts);
+        // On an arm, under whichever surface is lower.
+        if (open < 1 && fromRoad.dist <= fromRoad.inner) h = Math.min(h, fromRoad.h);
+        return { h, dist: Math.min(fromRoad.dist, 0) };
+      }
       if (fromRoad.dist <= fromRoad.inner) return fromRoad;
       const f = smoothstep((d - edge) / opts.terrainBlend);
-      const h = base + (dem(x, y) - base) * f;
+      const h = kerbBase + (dem(x, y) - kerbBase) * f;
       // Blend toward whichever feature pulls the ground further from the DEM.
       const ground = dem(x, y);
       return Math.abs(h - ground) > Math.abs(fromRoad.h - ground) ? { h, dist: Math.min(fromRoad.dist, d) } : fromRoad;
