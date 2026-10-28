@@ -99,6 +99,8 @@ export interface BuildOptions {
    * and grass on the aerial photo's lawns, sharp up close.
    */
   detailShaders: boolean;
+  /** Write data/traffic.json for CSP's traffic planner (turns on extended track physics, see surfacesIni). */
+  traffic: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -142,6 +144,7 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   noTrace: [],
   kerbs: true,
   detailShaders: true,
+  traffic: false,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

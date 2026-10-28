@@ -379,6 +379,7 @@ function readOptions(): Partial<BuildOptions> {
     landmarks: $<HTMLInputElement>("landmarks").checked,
     traceRoads: $<HTMLInputElement>("traceRoads").checked,
     kerbs: $<HTMLInputElement>("kerbs").checked,
+    traffic: $<HTMLInputElement>("traffic").checked,
     detailShaders: $<HTMLInputElement>("detailShaders").checked,
     noTrace: zones.map((z) => ({ at: z.at, radius: ZONE_RADIUS })),
   };
