@@ -334,16 +334,24 @@ export function treeAtlas(): Uint8Array {
     const patch = r() < 0.15 ? 0.82 : 1;
     return [(208 - t * 20) * patch + r() * 10, (200 - t * 22) * patch + r() * 10, (184 - t * 26) * patch + r() * 8];
   };
-  for (let y = 250; y < 512; y++) {
-    const t = 3 + (y - 250) * 0.018;
-    for (let x = 640 - t; x < 640 + t; x++) put(x, y, gum((512 - y) / 262));
+  for (let y = 300; y < 512; y++) {
+    const t = 3.5 + (y - 300) * 0.02;
+    for (let x = 640 - t; x < 640 + t; x++) put(x, y, gum((512 - y) / 212));
   }
-  const limbs: [number, number][] = [[-62, 120], [-30, 70], [8, 40], [44, 85], [70, 140], [-80, 190], [86, 205]];
-  for (const [dx, ty] of limbs) {
-    const bx = 640 + dx * 0.25, by = 250 + (ty > 150 ? 20 : 0);
-    line(bx, by, 640 + dx, ty, ty > 150 ? 3 : 4, (t) => gum(0.6 + t * 0.4));
-    for (let i = 0; i < 7; i++) {
-      blob(640 + dx + (r() - 0.5) * 60, ty + (r() - 0.5) * 50, 9 + r() * 14, 0.75 + r() * 0.5, 512, 768, [92, 104, 72], 0.75);
+  // Limbs leave the trunk at different heights and bend outward, then up;
+  // foliage clumps along their outer half.
+  const limbs: [number, number, number][] = [
+    [300, -95, 95], [318, 82, 120], [342, -55, 175], [360, 100, 205], [305, 20, 55], [330, -20, 120],
+  ];
+  for (const [y0, dx, yEnd] of limbs) {
+    const midX = 640 + dx * 0.55, midY = (y0 + yEnd) / 2 + 25;
+    const w0 = y0 > 320 ? 4 : 5;
+    line(640, y0, midX, midY, w0, (t) => gum(0.55 + t * 0.2));
+    line(midX, midY, 640 + dx, yEnd, w0 - 2, (t) => gum(0.75 + t * 0.25));
+    for (let i = 0; i < 12; i++) {
+      const t = 0.45 + r() * 0.65;
+      const x = midX + (dx * 0.45) * (t - 0.5) * 2 + (r() - 0.5) * 40, y = midY + (yEnd - midY) * Math.min(1, t) - r() * 25;
+      blob(x, y, 10 + r() * 15, 0.75 + r() * 0.5, 512, 768, [92, 104, 72], 0.75);
     }
   }
   // Palm: a thin ringed trunk with a crown of drooping fronds.
@@ -353,17 +361,23 @@ export function treeAtlas(): Uint8Array {
     const ring = (y % 9) < 2 ? 0.8 : 1;
     for (let dx = -4; dx <= 4; dx++) put(x + dx, y, [118 * ring + r() * 12, 104 * ring + r() * 10, 86 * ring]);
   }
-  for (let f = 0; f < 14; f++) {
-    const a = (f / 14) * Math.PI * 2 + r() * 0.2, L = 95 + r() * 25, lift = 0.35 + r() * 0.35;
+  // Fronds: some rising before they droop, some hanging; dense leaflets either side.
+  for (let f = 0; f < 18; f++) {
+    const a = (f / 18) * Math.PI * 2 + r() * 0.3;
+    const L = 80 + r() * 40, lift = 0.2 + r() * 0.8, droop = 0.5 + r() * 0.7;
+    const reach = Math.cos(a);
     let px0 = cx, py0 = cy;
-    for (let i = 1; i <= 24; i++) {
-      const t = i / 24;
-      const x = cx + Math.cos(a) * L * t, y = cy - Math.sin(Math.abs(Math.sin(a)) * lift + 0.15) * L * t * (1 - t) * 1.6 + 70 * t * t;
-      line(px0, py0, x, y, 2, () => [70 + r() * 15, 96 + r() * 20, 46]);
-      // Leaflets either side of the frond.
+    for (let i = 1; i <= 30; i++) {
+      const t = i / 30;
+      const x = cx + reach * L * t, y = cy - lift * L * t * 0.9 + droop * L * t * t;
+      line(px0, py0, x, y, 3, () => [74 + r() * 15, 100 + r() * 20, 48]);
+      // Leaflets: long near the base, shorter toward the tip, angled forward and down.
       const nx = -(y - py0), ny = x - px0, nl = Math.hypot(nx, ny) || 1;
-      const len = 14 * (1 - t * 0.6);
-      for (const sgn of [1, -1]) line(x, y, x + (nx / nl) * len * sgn, y + (ny / nl) * len * sgn + len * 0.5, 1, () => [52 + r() * 20, 98 + r() * 25, 40 + r() * 10]);
+      const len = 22 * (1 - t * 0.55);
+      for (const sgn of [1, -1]) {
+        const ex = x + (nx / nl) * len * sgn + (x - px0) * 0.8, ey = y + (ny / nl) * len * sgn + len * 0.6;
+        line(x, y, ex, ey, 2, () => [50 + r() * 22, 96 + r() * 28, 38 + r() * 12]);
+      }
       px0 = x;
       py0 = y;
     }
