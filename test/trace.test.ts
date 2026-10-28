@@ -102,3 +102,28 @@ describe("side street tracing", async () => {
     expect(st.widths![st.pts.length - 30]).toBeCloseTo(7, 0);
   });
 });
+
+describe("road tracing beside grey roofs and parking", () => {
+  /**
+   * A main street: an 8 m road on the OSM line (y = 0), angled parking the
+   * same colour as the road along the north side, then grey shop awnings
+   * right up to it, all much like asphalt from above.
+   */
+  function mainStreet(): RasterSampler {
+    let seed = 5;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    return (_x, y) => {
+      const n = (rnd() - 0.5) * 0.04;
+      if (y > -4 && y < 9.5) return [0.38 + n, 0.38 + n, 0.4 + n]; // road, then parking bays
+      if (y >= 9.5 && y < 40) return [0.4 + n, 0.4 + n, 0.42 + n]; // awnings
+      return [0.33 + n, 0.45 + n, 0.2 + n]; // grass
+    };
+  }
+  const path: Vec2[] = Array.from({ length: 31 }, (_, i) => [i * 20 - 300, 0]);
+  const plan = planRoad(path, withDefaults({ widthOverride: 8 }));
+  const tr = traceRoad(plan, mainStreet());
+
+  it("doesn't walk off onto the roofs", () => {
+    for (const i of plan.samples.keys()) expect(Math.abs(tr.offset[i])).toBeLessThan(1);
+  });
+});

@@ -41,6 +41,10 @@ export interface TraceResult {
 }
 
 const DT = 0.1;
+/** A traced road this much wider than the mapped street has taken in something else, metres. */
+const WIDER = 6;
+/** The trace never wanders further than this from the mapped line, metres. */
+const MAX_DRIFT = 5;
 
 interface Pixel {
   l: number;
@@ -153,10 +157,16 @@ export function traceRoad(plan: RoadPlan, raster: RasterSampler, osmWidths?: num
     const w = (hi - lo) * DT;
     let inRun = 0;
     for (let k = lo; k <= hi; k++) if (road[k]) inRun++;
-    if (w >= 3 && w <= 22 && inRun / (hi - lo + 1) > 0.75) {
+    // Not the road's edges: a run that carries on out of view (grey roofs,
+    // a car park), or one far wider than the street (parking bays alongside).
+    // Following those walks the trace off the road, a little more each row.
+    const open = lo <= 1 || hi >= m - 2;
+    const tooWide = w > widths[i] + WIDER;
+    if (!open && !tooWide && w >= 3 && w <= 22 && inRun / (hi - lo + 1) > 0.75) {
       left[i] = (hi - half) * DT; // +t is left
       right[i] = (lo - half) * DT;
-      centre = Math.round((lo + hi) / 2 * 0.3 + centre * 0.7);
+      const drift = Math.round(MAX_DRIFT / DT);
+      centre = Math.max(half - drift, Math.min(half + drift, Math.round((lo + hi) / 2 * 0.3 + centre * 0.7)));
     }
   }
 
