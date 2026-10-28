@@ -111,12 +111,11 @@ track's `extension/ext_config.ini`, so turn these on in CSP's settings:
 - **Rain FX**: puddles and soaked asphalt, darker concrete, slippery paint.
 
 Ambient occlusion makes the biggest single difference to how solid a scene
-looks (soft shadow where walls meet the ground, under eaves, along kerbs).
-It is baked per track on your PC with CSP's
-[vertex AO bakery](https://github.com/ac-custom-shaders-patch/acc-bakeryoptix)
-(needs an NVIDIA GPU): put the track in `content/tracks`, run the bakery on
-its folder, and it writes a `.vao-patch` file next to the `.kn5` that CSP
-loads automatically.
+looks (soft shadow where walls meet the ground, under eaves, along kerbs),
+and CSP expects tracks to have it. It is baked per track on your PC with
+CSP's [vertex AO bakery](https://github.com/ac-custom-shaders-patch/acc-bakeryoptix)
+(runs on any hardware: on the CPU, or the GPU on recent cards): put the
+track in `content/tracks` and run the bakery on its `.kn5`.
 
 If the road or the grass looks wrong up close (too dark, shiny or black),
 untick **Detail shaders** and build again: that goes back to plain
