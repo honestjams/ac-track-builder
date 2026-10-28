@@ -56,6 +56,7 @@ describe("buildTrack (synthetic terrain)", async () => {
     expect(names).toEqual([
       "test_hairpin/README.txt",
       "test_hairpin/ai/fast_lane.ai",
+      "test_hairpin/data/ai_hints.ini",
       "test_hairpin/data/cameras_1.ini",
       "test_hairpin/data/map.ini",
       "test_hairpin/data/surfaces.ini",
@@ -166,6 +167,9 @@ describe("buildTrack (synthetic terrain)", async () => {
 
   it("writes an AI line that follows the road from start to finish", () => {
     const ai = readFastLaneAi(result.files["test_hairpin/ai/fast_lane.ai"]);
+    // The hairpin gets a slow-down hint for the AI, inside the lap.
+    const hints = new TextDecoder().decode(result.files["test_hairpin/data/ai_hints.ini"]);
+    expect(hints).toMatch(/\[HINT_0\]\nSTART=0\.\d+\nEND=0\.\d+\nVALUE=0\.6/);
     expect(ai.length).toBe(result.plan.samples.length);
     // distances run along the 3D road, so slightly longer than the map length
     expect(ai[ai.length - 1].distance).toBeGreaterThan(result.plan.length * 0.99);

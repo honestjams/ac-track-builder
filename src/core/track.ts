@@ -2,7 +2,7 @@
 // through `DataSources`, so the same pipeline runs in the browser (real
 // tiles) and in Node tests (synthetic terrain).
 
-import { buildAiLine } from "./aiLine";
+import { aiHintsIni, buildAiLine } from "./aiLine";
 import { BACKDROP_CHUNK, backdropHeight, buildBackdropChunk, planBackdrop } from "./backdrop";
 import { writeFastLaneAi } from "./aiSpline";
 import { outlinePng, previewPng, readme, slugify, surfacesIni, trackMap, uiTrackJson, type TrackMeta } from "./acFiles";
@@ -924,7 +924,8 @@ export async function buildTrack(
 
   await progress("Writing track files");
   const kn5 = writeKn5(model);
-  const ai = writeFastLaneAi(buildAiLine(plan));
+  const aiPoints = buildAiLine(plan);
+  const ai = writeFastLaneAi(aiPoints);
   const outline2d = simplify(plan.samples.map((s) => s.pos), 0.5).map(([x, y]) => [x, -y] as [number, number]);
   if (plan.closed) outline2d.push(outline2d[0]);
   const map = trackMap(outline2d);
@@ -934,6 +935,7 @@ export async function buildTrack(
   const files: Record<string, Uint8Array> = {
     [`${slug}/${slug}.kn5`]: kn5,
     [`${slug}/ai/fast_lane.ai`]: ai,
+    [`${slug}/data/ai_hints.ini`]: enc.encode(aiHintsIni(aiPoints)),
     [`${slug}/data/surfaces.ini`]: enc.encode(surfacesIni()),
     [`${slug}/data/map.ini`]: enc.encode(map.ini),
     [`${slug}/data/cameras_1.ini`]: enc.encode(camerasIni(cameras)),
