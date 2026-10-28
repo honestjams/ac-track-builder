@@ -39,6 +39,8 @@ export interface Building {
   front?: [Vec2, Vec2];
   /** A garage door on the front wall. */
   garage?: boolean;
+  /** Distance from the road edge to the front wall, metres, where known. */
+  setback?: number;
 }
 
 /** Most Australian houses have a hip roof; about a third a gable. */
@@ -305,26 +307,51 @@ function wall(mb: MeshBuilder, p: Vec2, q: Vec2, base: number, top: number, u0: 
 }
 
 /**
- * A roller door on the street-facing wall, at the end nearer the
- * driveway side: 2.6 m wide, 2.1 m tall, a couple of centimetres proud.
+ * What a house shows the street: a roller door on the garage at one end of
+ * the front wall (2.6 m x 2.1 m) with a concrete driveway from it out to the
+ * nature strip, and the front door toward the other end.
  */
-function garageDoor(mb: MeshBuilder, front: [Vec2, Vec2], ring: Vec2[], ground: HeightFn): void {
-  // Which way the front wall runs in the (counter-clockwise) ring, so the door faces out.
+function frontage(
+  b: Building,
+  ring: Vec2[],
+  ground: HeightFn,
+  mesh: { garage: MeshBuilder; door: MeshBuilder; drive: MeshBuilder },
+): void {
+  const front = b.front!;
+  const same = (a: Vec2, c: Vec2) => Math.hypot(a[0] - c[0], a[1] - c[1]) < 0.05;
+  // The front wall as it runs in the (counter-clockwise) ring, so things on it face out.
   const k = ring.findIndex((p, i) => {
     const q = ring[(i + 1) % ring.length];
-    const same = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05;
     return (same(p, front[0]) && same(q, front[1])) || (same(p, front[1]) && same(q, front[0]));
   });
   if (k < 0) return;
   const p = ring[k], q = ring[(k + 1) % ring.length];
   const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
-  if (len < 6) return;
+  if (len < 5) return;
   const d: Vec2 = [(q[0] - p[0]) / len, (q[1] - p[1]) / len];
   const out: Vec2 = [d[1], -d[0]]; // right of p->q: outside, for a counter-clockwise ring
-  const a: Vec2 = [p[0] + d[0] * 0.6 + out[0] * 0.02, p[1] + d[1] * 0.6 + out[1] * 0.02];
-  const b: Vec2 = [a[0] + d[0] * 2.6, a[1] + d[1] * 2.6];
-  const z = Math.min(ground(a[0], a[1]), ground(b[0], b[1]));
-  face(mb, [[a[0], a[1], z], [b[0], b[1], z], [b[0], b[1], z + 2.1], [a[0], a[1], z + 2.1]], (v) => [Math.hypot(v[0] - a[0], v[1] - a[1]) / 2.6, 1 - (v[2] - z) / 2.1]);
+  const along = (m: number, proud = 0.02): Vec2 => [p[0] + d[0] * m + out[0] * proud, p[1] + d[1] * m + out[1] * proud];
+  const panel = (mb: MeshBuilder, m0: number, w: number, h: number) => {
+    const a = along(m0), c = along(m0 + w);
+    const z = Math.min(ground(a[0], a[1]), ground(c[0], c[1]));
+    face(mb, [[a[0], a[1], z], [c[0], c[1], z], [c[0], c[1], z + h], [a[0], a[1], z + h]], (v) => [Math.hypot(v[0] - a[0], v[1] - a[1]) / w, 1 - (v[2] - z) / h]);
+  };
+  const garage = b.garage && len >= 6;
+  if (garage) {
+    panel(mesh.garage, 0.6, 2.6, 2.1);
+    // The driveway: from the door out to where the nature strip starts, about 3.5 m from the road.
+    const run = (b.setback ?? 0) - 3.5;
+    if (run > 1) {
+      const pts: Vec3[] = [];
+      for (const [m, o] of [[0.4, 0.05], [3.4, 0.05], [3.4, run], [0.4, run]] as const) {
+        const v = along(m, o);
+        pts.push([v[0], v[1], ground(v[0], v[1]) + 0.03]);
+      }
+      face(mesh.drive, pts.reverse(), (v) => [v[0] / 3, v[1] / 3]);
+    }
+  }
+  // The front door: toward the far end from the garage, or a third of the way along.
+  panel(mesh.door, garage ? Math.min(len - 1.4, 4.2) : len / 3, 0.85, 2.05);
 }
 
 /** One flat polygon with an explicit normal. */
@@ -349,7 +376,7 @@ function face(mb: MeshBuilder, pts: Vec3[], uv: (p: Vec3) => [number, number]): 
 export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5MeshNode[] {
   const walls = FACADES.map(() => new ChunkedMesh(0));
   const roofs = ROOF_COLOURS.map(() => new ChunkedMesh(0));
-  const soffits = new ChunkedMesh(0), garages = new ChunkedMesh(0);
+  const soffits = new ChunkedMesh(0), garages = new ChunkedMesh(0), doors = new ChunkedMesh(0), drives = new ChunkedMesh(0);
   for (const b of buildings) {
     const ring = ringArea(b.ring) < 0 ? b.ring.slice().reverse() : b.ring;
     const hs = ring.map(([x, y]) => ground(x, y));
@@ -400,7 +427,7 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
         const k2 = (k + 1) % 4;
         face(sm, [at(r[k]), at(r[k2]), g[k2], g[k]], (p) => [p[0] / 4, p[1] / 4]);
       }
-      if (b.garage && b.front) garageDoor(garages.next(8), b.front, ring, ground);
+      if (b.front) frontage(b, ring, ground, { garage: garages.next(8), door: doors.next(4), drive: drives.next(16) });
       continue;
     }
     const tris = earcut(ring.flatMap((p) => p));
@@ -421,5 +448,7 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
   roofs.forEach((cm, c) => cm.all().forEach((m, i) => out.push(m.toKn5(`ROOF_${ROOF_COLOURS[c].name}_${pad(i)}`, `roof_${ROOF_COLOURS[c].name}`))));
   soffits.all().forEach((m, i) => out.push(m.toKn5(`SOFFIT_${pad(i)}`, "canopy", { castShadows: false })));
   garages.all().forEach((m, i) => out.push(m.toKn5(`GARAGE_${pad(i)}`, "garage", { castShadows: false })));
+  doors.all().forEach((m, i) => out.push(m.toKn5(`DOOR_${pad(i)}`, "door", { castShadows: false })));
+  drives.all().forEach((m, i) => out.push(m.toKn5(`DRIVEWAY_${pad(i)}`, "concrete", { castShadows: false })));
   return out;
 }

@@ -248,6 +248,7 @@ function box(cols: Column[], side: 1 | -1, rand: () => number): Building | null 
     facade: Math.floor(rand() * FACADES.length),
     source: "frontage",
     front: facing,
+    setback: front,
     // About half the houses on a street show a garage door to it.
     garage: s1 - s0 >= 8 && rand() < 0.5,
   };
