@@ -99,6 +99,10 @@ export interface BuildOptions {
    * and grass on the aerial photo's lawns, sharp up close.
    */
   detailShaders: boolean;
+  /** Coarser terrain blocks away from the road where the ground is flat enough (see buildTerrainChunk). */
+  terrainLod: boolean;
+  /** No level-of-detail blocks within this distance of the road's centreline, metres. */
+  terrainLodNear: number;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -142,6 +146,8 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   noTrace: [],
   kerbs: true,
   detailShaders: true,
+  terrainLod: true,
+  terrainLodNear: 25,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

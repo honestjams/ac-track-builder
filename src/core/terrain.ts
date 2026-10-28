@@ -105,6 +105,9 @@ function roadTerrain(plan: RoadPlan, index: SegmentIndex, dem: HeightFn, opts: B
   };
 }
 
+/** Largest height error a level-of-detail block may make, metres: tighter near the road, where kerbs, paths and driveways sit a few centimetres up. */
+const LOD_TOL = 0.02, LOD_TOL_FAR = 0.05, LOD_FAR = 40;
+
 export function buildTerrainChunk(
   chunk: TerrainChunk,
   terrain: (x: number, y: number) => TerrainSample,
@@ -119,27 +122,85 @@ export function buildTerrainChunk(
   const P = N + 2;
   const hs = new Float32Array(P * P);
   const inside = new Uint8Array(P * P);
+  const dists = new Float32Array(P * P);
   for (let j = 0; j < P; j++) {
     for (let i = 0; i < P; i++) {
       const x = chunk.minX + (i - 1) * step, y = chunk.minY + (j - 1) * step;
       const s = terrain(x, y);
       hs[j * P + i] = s.h;
       inside[j * P + i] = s.dist <= opts.corridor ? 1 : 0;
+      dists[j * P + i] = s.dist;
     }
   }
   const id = (i: number, j: number) => (j + 1) * P + (i + 1);
+
+  const quadIn = (i: number, j: number) => inside[id(i, j)] && inside[id(i + 1, j)] && inside[id(i, j + 1)] && inside[id(i + 1, j + 1)];
+
+  // Level of detail: away from the road, a K x K block of cells that is flat
+  // enough (every node within LOD_TOL of the plane through its corners) is
+  // drawn as one fan from its centre node instead of 2 K^2 triangles. Its
+  // boundary keeps the in-between nodes along any edge it shares with fine
+  // cells or another chunk, so there are no T-junctions and no cracks.
+  const K = 4;
+  const B = opts.terrainLod ? Math.floor(cells / K) : 0;
+  const coarse = new Uint8Array(B * B);
+  for (let bj = 0; bj < B; bj++) {
+    for (let bi = 0; bi < B; bi++) {
+      const i0 = bi * K, j0 = bj * K;
+      let ok = true;
+      const h00 = hs[id(i0, j0)], h10 = hs[id(i0 + K, j0)], h01 = hs[id(i0, j0 + K)], h11 = hs[id(i0 + K, j0 + K)];
+      for (let j = j0; ok && j <= j0 + K; j++) {
+        for (let i = i0; ok && i <= i0 + K; i++) {
+          if (i < i0 + K && j < j0 + K && !quadIn(i, j)) ok = false;
+          else if (dists[id(i, j)] < opts.terrainLodNear) ok = false;
+          else {
+            const u = (i - i0) / K, v = (j - j0) / K;
+            const flat = h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
+            if (Math.abs(hs[id(i, j)] - flat) > (dists[id(i, j)] < LOD_FAR ? LOD_TOL : LOD_TOL_FAR)) ok = false;
+          }
+        }
+      }
+      coarse[bj * B + bi] = ok ? 1 : 0;
+    }
+  }
+  const isCoarse = (bi: number, bj: number) => bi >= 0 && bj >= 0 && bi < B && bj < B && coarse[bj * B + bi] === 1;
+  const inCoarse = (i: number, j: number) => isCoarse(Math.floor(i / K), Math.floor(j / K)) && i < B * K && j < B * K;
 
   const used = new Uint8Array(N * N);
   const quads: number[] = [];
   for (let j = 0; j < cells; j++) {
     for (let i = 0; i < cells; i++) {
-      if (inside[id(i, j)] && inside[id(i + 1, j)] && inside[id(i, j + 1)] && inside[id(i + 1, j + 1)]) {
-        quads.push(i, j);
-        used[j * N + i] = used[j * N + i + 1] = used[(j + 1) * N + i] = used[(j + 1) * N + i + 1] = 1;
-      }
+      if (inCoarse(i, j) || !quadIn(i, j)) continue;
+      quads.push(i, j);
+      used[j * N + i] = used[j * N + i + 1] = used[(j + 1) * N + i] = used[(j + 1) * N + i + 1] = 1;
     }
   }
-  if (!quads.length) return null;
+  // Each coarse block's boundary loop (counter-clockwise from above) and centre.
+  const fans: number[][] = [];
+  for (let bj = 0; bj < B; bj++) {
+    for (let bi = 0; bi < B; bi++) {
+      if (!isCoarse(bi, bj)) continue;
+      const i0 = bi * K, j0 = bj * K;
+      const loop: [number, number][] = [];
+      // Edges: south (j0, i rising), east (i0+K, j rising), north (j0+K, i falling), west (i0, j falling).
+      const edges: [number, number, number, number, boolean][] = [
+        [i0, j0, 1, 0, isCoarse(bi, bj - 1)],
+        [i0 + K, j0, 0, 1, isCoarse(bi + 1, bj)],
+        [i0 + K, j0 + K, -1, 0, isCoarse(bi, bj + 1)],
+        [i0, j0 + K, 0, -1, isCoarse(bi - 1, bj)],
+      ];
+      for (const [si, sj, di, dj, both] of edges) {
+        for (let k = 0; k < K; k++) {
+          if (k > 0 && both) continue; // a coarse neighbour: corners only
+          loop.push([si + di * k, sj + dj * k]);
+        }
+      }
+      const c: [number, number] = [i0 + K / 2, j0 + K / 2];
+      for (const [i, j] of [...loop, c]) used[j * N + i] = 1;
+      fans.push([c[0], c[1], ...loop.flat()]);
+    }
+  }
+  if (!quads.length && !fans.length) return null;
 
   const mb = new MeshBuilder();
   mb.normals = [];
@@ -163,6 +224,14 @@ export function buildTerrainChunk(
     // y grows north, so a-b-c-d runs counter-clockwise seen from above.
     if ((i + j) % 2 === 0) mb.quad(a, b, c, d);
     else mb.quad(b, c, d, a);
+  }
+  for (const f of fans) {
+    const c = vi[f[1] * N + f[0]];
+    const n = (f.length - 2) / 2;
+    for (let k = 0; k < n; k++) {
+      const a = vi[f[3 + k * 2] * N + f[2 + k * 2]], b = vi[f[3 + ((k + 1) % n) * 2] * N + f[2 + ((k + 1) % n) * 2]];
+      mb.tri(c, a, b);
+    }
   }
   const material = textured ? `terrain_${chunk.key}` : "grass";
   return mb.toKn5(`1GRASS_${chunk.key}`, material);
