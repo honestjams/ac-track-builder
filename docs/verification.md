@@ -44,6 +44,7 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 28 | With CSP and night time: street lights light the road in pools beneath them and the lanterns glow; off by day | `extension/ext_config.ini`, `cspConfig.ts` |
 | 30 | With CSP and Grass FX on: grass blades grow on lawns and nature strips near the car, never through the road, footpaths or driveways | `[GRASS_FX]` in `extension/ext_config.ini` |
 | 29 | Running wide into a tree or a fence stops the car; nothing solid on the road | `1WALL_TREE_*`, `1WALL_FENCE_*` |
+| 31 | Up close the road shows stones in the surface and lawns show grass blades; nothing turns black, white or shiny (if it does, untick Detail shaders and say what you saw) | `multiMapMaterial` in `track.ts`, `detailTexture` / `grassAlpha` in `textures.ts` |
 | 24 | A replay switches between trackside cameras that follow the car (not stuck on the chase cam), none inside a building or the ground | `data/cameras_1.ini`, `cameras.ts` |
 
 ## Known unknowns

@@ -94,6 +94,11 @@ export interface BuildOptions {
   noTrace: { at: [number, number]; radius: number }[];
   /** Kerb and gutter where the photos (or a built-up area) show them, instead of a gravel verge. */
   kerbs: boolean;
+  /**
+   * Detail-mapped materials (ksPerPixelMultiMap): asphalt grain on the road
+   * and grass on the aerial photo's lawns, sharp up close.
+   */
+  detailShaders: boolean;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -136,6 +141,7 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   traceRoads: true,
   noTrace: [],
   kerbs: true,
+  detailShaders: true,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {

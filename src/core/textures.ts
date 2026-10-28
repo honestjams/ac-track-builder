@@ -542,3 +542,98 @@ export function barrierTexture(kind: (typeof BARRIERS)[number]): Uint8Array {
     return [36 * k + n / 2, 78 * k + n, 32 * k + n / 2];
   }), w, h, { alpha: false });
 }
+
+/*
+ * Detail-mapped materials (ksPerPixelMultiMap). How the game uses these, from
+ * its shaders (CSP's recreation of the Kunos ones):
+ *   diffuse = lerp(diffuse, detail * diffuse, 1 - diffuse.alpha)
+ * so the detail texture multiplies the photo or seal texture wherever that
+ * texture's alpha is 0, tiled detailUVMultiplier times across its UVs. It
+ * is kept close to white so it adds grain without darkening the surface.
+ * txMaps: R scales specular, G glossiness, B sun specular.
+ */
+export type DetailKind = "asphalt" | "chipseal" | "grass";
+
+/**
+ * A tileable 256 px close-up detail. Asphalt and chip seal are drawn
+ * squashed 3:1 along v, because the road's UVs run 24 m along for about 8 m
+ * across: on the road the stones come out round.
+ */
+export function detailTexture(kind: DetailKind): Uint8Array {
+  const w = 256, h = 256;
+  const r = rng(301 + kind.length * 7);
+  const base = valueNoise(w, h, kind === "grass" ? 16 : 8, 302);
+  const px = new Float32Array(w * h).fill(1);
+  if (kind === "grass") {
+    // Blades: short dark and light strokes in every direction, over a gentle mottle.
+    for (let i = 0; i < 9000; i++) {
+      const x0 = r() * w, y0 = r() * h, a = r() * Math.PI, len = 3 + r() * 6, k = r() < 0.6 ? 0.78 + r() * 0.1 : 1;
+      for (let t = 0; t < len; t++) {
+        const x = Math.floor(x0 + Math.cos(a) * t + w) % w, y = Math.floor(y0 + Math.sin(a) * t + h) % h;
+        px[y * w + x] = Math.min(px[y * w + x], k);
+      }
+    }
+  } else {
+    // Aggregate: stones, darker and lighter than the binder, round on the road.
+    const n = kind === "chipseal" ? 2600 : 5200, rx = kind === "chipseal" ? 4.5 : 2.4;
+    for (let i = 0; i < n; i++) {
+      const cx = r() * w, cy = r() * h, rad = rx * (0.6 + r() * 0.8), k = r() < 0.55 ? 0.72 + r() * 0.12 : 0.97 + r() * 0.03;
+      for (let dy = -Math.ceil(rad / 3); dy <= Math.ceil(rad / 3); dy++) {
+        for (let dx = -Math.ceil(rad); dx <= Math.ceil(rad); dx++) {
+          if ((dx / rad) ** 2 + ((dy * 3) / rad) ** 2 > 1) continue;
+          const x = (Math.floor(cx) + dx + w) % w, y = (Math.floor(cy) + dy + h) % h;
+          px[y * w + x] = Math.min(px[y * w + x], k);
+        }
+      }
+    }
+  }
+  return encodePng(fill(w, h, (_x, _y, i) => {
+    const v = 255 * px[i] * (0.94 + base[i] * 0.06);
+    return kind === "grass" ? [v * 0.97, v, v * 0.94] : [v, v, v];
+  }), w, h, { alpha: false });
+}
+
+/** A flat tangent-space normal map (no relief), for multimap materials that need one. */
+export function flatNormalTexture(): Uint8Array {
+  return encodePng(fill(4, 4, () => [128, 128, 255]), 4, 4, { alpha: false });
+}
+
+/** A constant txMaps: specular, glossiness and sun-specular multipliers, 0..1. */
+export function mapsTexture(spec: number, gloss: number, sun: number): Uint8Array {
+  return encodePng(fill(4, 4, () => [spec * 255, gloss * 255, sun * 255]), 4, 4, { alpha: false });
+}
+
+/**
+ * How grassy each pixel of an aerial photo is, as the alpha a multimap
+ * reads (0 = full grass detail, 255 = none): green lawns, and the dry
+ * yellow-brown grass and bare earth of an Australian summer. Roofs, roads,
+ * concrete, water and deep shade keep 255. Softened over 3 px.
+ */
+export function grassAlpha(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number): Uint8Array {
+  const score = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const r = rgba[i * 4] / 255, g = rgba[i * 4 + 1] / 255, b = rgba[i * 4 + 2] / 255;
+    const l = (r + g + b) / 3, mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const sat = mx > 0 ? (mx - mn) / mx : 0;
+    const exg = (2 * g - r - b) / (r + g + b + 1e-4);
+    const green = l > 0.08 && l < 0.6 ? Math.min(1, Math.max(0, exg / 0.08)) : 0;
+    const dry = l > 0.18 && l < 0.62 && r > b * 1.15 && g > b * 1.05 && sat > 0.12 && sat < 0.55 ? 1 : 0;
+    score[i] = Math.max(green, dry);
+  }
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let s = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+          s += score[yy * w + xx];
+          n++;
+        }
+      }
+      out[y * w + x] = Math.round(255 * (1 - s / n));
+    }
+  }
+  return out;
+}

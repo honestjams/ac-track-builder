@@ -39,6 +39,18 @@ function allNodes(n: Kn5Node): Kn5Node[] {
 describe("buildTrack (synthetic terrain)", async () => {
   const result = await buildTrack(windingRoute(), { name: "Test Hairpin", imageryZoom: 0, corridor: 60 }, sources);
 
+  it("gives the road a detail-mapped material with its textures bound to the right registers", () => {
+    const kn5 = readKn5(result.files["test_hairpin/test_hairpin.kn5"]);
+    const roads = kn5.materials.filter((m) => /^road_(asphalt|chipseal)_/.test(m.name));
+    expect(roads.length).toBeGreaterThan(0);
+    for (const m of roads) {
+      expect(m.shader).toBe("ksPerPixelMultiMap");
+      expect(m.registers).toEqual({ txDiffuse: 0, txNormal: 1, txMaps: 2, txDetail: 3 });
+      expect(m.properties.find((p) => p.name === "useDetail")?.a).toBe(1);
+      expect(m.properties.find((p) => p.name === "detailUVMultiplier")?.a).toBeGreaterThan(1);
+    }
+  });
+
   it("produces a complete track folder", () => {
     const names = Object.keys(result.files).sort();
     expect(names).toEqual([
