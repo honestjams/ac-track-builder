@@ -4,7 +4,10 @@
 //    their mapped height. Coverage is good in cities and thin in the bush.
 //  - Placeholders detected from the aerial imagery: compact patches that
 //    look like a roof (pale or dark grey metal, terracotta tile) become a
-//    box house with a gable roof in the matching colour.
+//    house with a hip or gable roof in the matching colour.
+//
+// Houses get eaves (the roof overhangs the walls, with white soffits) and,
+// along a street frontage, often a roller door on the garage facing it.
 //
 // Walls are collidable (1WALL_BLD_*). Roofs are visual only.
 
@@ -25,16 +28,27 @@ export interface Building {
   ring: Vec2[];
   /** Wall height to the eaves, metres. */
   height: number;
-  roof: "flat" | "gable";
+  roof: "flat" | "gable" | "hip";
   /** Index into ROOF_COLOURS. */
   roofColour: number;
   /** Index into FACADES. */
   facade: number;
   /** Mapped, a roof patch found in the photo, or a house found along a street frontage. */
   source: "osm" | "detected" | "frontage";
+  /** The wall facing the street (its two corners), where known. */
+  front?: [Vec2, Vec2];
+  /** A garage door on the front wall. */
+  garage?: boolean;
+}
+
+/** Most Australian houses have a hip roof; about a third a gable. */
+export function houseRoof(rand: () => number): "gable" | "hip" {
+  return rand() < 0.68 ? "hip" : "gable";
 }
 
 const ROOF_PITCH = Math.tan((22 * Math.PI) / 180);
+/** Eave overhang beyond the walls, metres. */
+const EAVE = 0.45;
 
 export function ringArea(r: Vec2[]): number {
   let a = 0;
@@ -105,7 +119,7 @@ export function fromOsm(ring: Vec2[], tags: Record<string, string>, seed: number
   return {
     ring,
     height,
-    roof: small && isRectangle(ring) ? "gable" : "flat",
+    roof: !small || !isRectangle(ring) ? "flat" : tags["roof:shape"] === "gabled" ? "gable" : tags["roof:shape"] === "hipped" ? "hip" : houseRoof(rand),
     roofColour: roofTag >= 0 ? roofTag : Math.floor(rand() * ROOF_COLOURS.length),
     facade: small ? Math.floor(rand() * FACADES.length) : 2,
     source: "osm",
@@ -244,7 +258,7 @@ export function detectBuildings(rgba: Uint8Array | Uint8ClampedArray, size: numb
     out.push({
       ring,
       height: area > 250 ? 3.6 : 2.8,
-      roof: "gable",
+      roof: houseRoof(rand),
       roofColour: nearestRoofColour(rgb),
       facade: Math.floor(rand() * FACADES.length),
       source: "detected",
@@ -280,7 +294,7 @@ function wall(mb: MeshBuilder, p: Vec2, q: Vec2, base: number, top: number, u0: 
   const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
   const n: Vec3 = [(q[1] - p[1]) / (len || 1), -(q[0] - p[0]) / (len || 1), 0];
   const i = mb.vertexCount;
-  const u1 = u0 + len / 4, v1 = (top - base) / 3;
+  const u1 = u0 + len / 8, v1 = (top - base) / 3; // texture: 8 m by 3 m
   mb.vertex([p[0], p[1], base], u0, v1);
   mb.vertex([q[0], q[1], base], u1, v1);
   mb.vertex([q[0], q[1], top], u1, 0);
@@ -288,6 +302,29 @@ function wall(mb: MeshBuilder, p: Vec2, q: Vec2, base: number, top: number, u0: 
   for (let j = 0; j < 4; j++) mb.normals!.push(...n);
   mb.quad(i, i + 1, i + 2, i + 3);
   return u1;
+}
+
+/**
+ * A roller door on the street-facing wall, at the end nearer the
+ * driveway side: 2.6 m wide, 2.1 m tall, a couple of centimetres proud.
+ */
+function garageDoor(mb: MeshBuilder, front: [Vec2, Vec2], ring: Vec2[], ground: HeightFn): void {
+  // Which way the front wall runs in the (counter-clockwise) ring, so the door faces out.
+  const k = ring.findIndex((p, i) => {
+    const q = ring[(i + 1) % ring.length];
+    const same = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 0.05;
+    return (same(p, front[0]) && same(q, front[1])) || (same(p, front[1]) && same(q, front[0]));
+  });
+  if (k < 0) return;
+  const p = ring[k], q = ring[(k + 1) % ring.length];
+  const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+  if (len < 6) return;
+  const d: Vec2 = [(q[0] - p[0]) / len, (q[1] - p[1]) / len];
+  const out: Vec2 = [d[1], -d[0]]; // right of p->q: outside, for a counter-clockwise ring
+  const a: Vec2 = [p[0] + d[0] * 0.6 + out[0] * 0.02, p[1] + d[1] * 0.6 + out[1] * 0.02];
+  const b: Vec2 = [a[0] + d[0] * 2.6, a[1] + d[1] * 2.6];
+  const z = Math.min(ground(a[0], a[1]), ground(b[0], b[1]));
+  face(mb, [[a[0], a[1], z], [b[0], b[1], z], [b[0], b[1], z + 2.1], [a[0], a[1], z + 2.1]], (v) => [Math.hypot(v[0] - a[0], v[1] - a[1]) / 2.6, 1 - (v[2] - z) / 2.1]);
 }
 
 /** One flat polygon with an explicit normal. */
@@ -312,6 +349,7 @@ function face(mb: MeshBuilder, pts: Vec3[], uv: (p: Vec3) => [number, number]): 
 export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5MeshNode[] {
   const walls = FACADES.map(() => new ChunkedMesh(0));
   const roofs = ROOF_COLOURS.map(() => new ChunkedMesh(0));
+  const soffits = new ChunkedMesh(0), garages = new ChunkedMesh(0);
   for (const b of buildings) {
     const ring = ringArea(b.ring) < 0 ? b.ring.slice().reverse() : b.ring;
     const hs = ring.map(([x, y]) => ground(x, y));
@@ -321,25 +359,48 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
     const rm = roofs[b.roofColour].next(ring.length * 3 + 8);
     let u = 0;
     for (let k = 0; k < ring.length; k++) u = wall(wm, ring[k], ring[(k + 1) % ring.length], base, top, u);
-    // Roof sheets: 2 m texture repeat, laid along the slope.
-    const roofUv = (p: Vec3): [number, number] => [p[0] / 2, -p[1] / 2];
-
-    if (b.roof === "gable" && ring.length === 4) {
-      // Rotate so ring[0]->ring[1] is a long side (the eave).
+    if (b.roof !== "flat" && ring.length === 4) {
+      // Rotate so r[0]->r[1] is a long side (an eave).
       const l0 = Math.hypot(ring[1][0] - ring[0][0], ring[1][1] - ring[0][1]);
       const l1 = Math.hypot(ring[2][0] - ring[1][0], ring[2][1] - ring[1][1]);
       const r = l0 >= l1 ? ring : [ring[1], ring[2], ring[3], ring[0]];
-      const span = Math.min(l0, l1);
+      const span = Math.min(l0, l1), long = Math.max(l0, l1);
       const ridgeZ = top + (span / 2) * ROOF_PITCH;
-      const mid = (a: Vec2, c: Vec2): Vec3 => [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2, ridgeZ];
-      const ridgeA = mid(r[3], r[0]), ridgeB = mid(r[1], r[2]);
-      const at = (p: Vec2): Vec3 => [p[0], p[1], top];
-      // Eave overhang is skipped: the walls stop at `top`, the roof starts there.
-      face(rm, [at(r[0]), at(r[1]), ridgeB, ridgeA], roofUv);
-      face(rm, [at(r[2]), at(r[3]), ridgeA, ridgeB], roofUv);
-      // Gable-end triangles, in wall material.
-      face(wm, [at(r[1]), at(r[2]), ridgeB], (p) => [p[0] / 4, (ridgeZ - p[2]) / 3]);
-      face(wm, [at(r[3]), at(r[0]), ridgeA], (p) => [p[0] / 4, (ridgeZ - p[2]) / 3]);
+      // The roof's edge: the footprint grown by the overhang, dropped to match the pitch.
+      const eaveZ = top - EAVE * ROOF_PITCH;
+      const c = centroid(r);
+      const e: Vec2 = [(r[1][0] - r[0][0]) / long, (r[1][1] - r[0][1]) / long], n: Vec2 = [-e[1], e[0]];
+      const grow = (p: Vec2): Vec3 => {
+        const a = (p[0] - c[0]) * e[0] + (p[1] - c[1]) * e[1], b2 = (p[0] - c[0]) * n[0] + (p[1] - c[1]) * n[1];
+        const a2 = a + Math.sign(a) * EAVE, b3 = b2 + Math.sign(b2) * EAVE;
+        return [c[0] + e[0] * a2 + n[0] * b3, c[1] + e[1] * a2 + n[1] * b3, eaveZ];
+      };
+      const g = r.map(grow);
+      // Ridge along the long axis: full length for a gable (to the eaves), shortened by half the span each end for a hip.
+      const inset = b.roof === "hip" ? Math.min(long / 2, span / 2) : -EAVE;
+      const ridge = (sign: -1 | 1): Vec3 => [c[0] + e[0] * sign * (long / 2 - inset), c[1] + e[1] * sign * (long / 2 - inset), ridgeZ];
+      const ridgeA = ridge(-1), ridgeB = ridge(1);
+      // Roof sheets: 2 m texture repeat.
+      const roofUv = (p: Vec3): [number, number] => [p[0] / 2, -p[1] / 2];
+      face(rm, [g[0], g[1], ridgeB, ridgeA], roofUv);
+      face(rm, [g[2], g[3], ridgeA, ridgeB], roofUv);
+      const at = (p: Vec2, z = top): Vec3 => [p[0], p[1], z];
+      if (b.roof === "hip") {
+        face(rm, [g[1], g[2], ridgeB], roofUv);
+        face(rm, [g[3], g[0], ridgeA], roofUv);
+      } else {
+        // Gable ends: the wall carries on up to the ridge, in the wall's plane.
+        const wallRidge = (sign: -1 | 1): Vec3 => [c[0] + e[0] * sign * long / 2, c[1] + e[1] * sign * long / 2, ridgeZ];
+        face(wm, [at(r[1]), at(r[2]), wallRidge(1)], (p) => [p[0] / 8, (ridgeZ - p[2]) / 3]);
+        face(wm, [at(r[3]), at(r[0]), wallRidge(-1)], (p) => [p[0] / 8, (ridgeZ - p[2]) / 3]);
+      }
+      // Soffits: under the overhang, from the top of the wall out to the roof's edge, facing down.
+      const sm = soffits.next(16);
+      for (let k = 0; k < 4; k++) {
+        const k2 = (k + 1) % 4;
+        face(sm, [at(r[k]), at(r[k2]), g[k2], g[k]], (p) => [p[0] / 4, p[1] / 4]);
+      }
+      if (b.garage && b.front) garageDoor(garages.next(8), b.front, ring, ground);
       continue;
     }
     const tris = earcut(ring.flatMap((p) => p));
@@ -358,5 +419,7 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
   const out: Kn5MeshNode[] = [];
   walls.forEach((cm, f) => cm.all().forEach((m, i) => out.push(m.toKn5(`1WALL_BLD_${FACADES[f]}_${pad(i)}`, `facade_${FACADES[f]}`))));
   roofs.forEach((cm, c) => cm.all().forEach((m, i) => out.push(m.toKn5(`ROOF_${ROOF_COLOURS[c].name}_${pad(i)}`, `roof_${ROOF_COLOURS[c].name}`))));
+  soffits.all().forEach((m, i) => out.push(m.toKn5(`SOFFIT_${pad(i)}`, "canopy", { castShadows: false })));
+  garages.all().forEach((m, i) => out.push(m.toKn5(`GARAGE_${pad(i)}`, "garage", { castShadows: false })));
   return out;
 }

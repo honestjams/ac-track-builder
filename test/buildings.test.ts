@@ -35,7 +35,7 @@ describe("roof detection", () => {
     // image y runs south: the metal roof's centre sits 46 m below the top edge
     const cy = metal!.ring.reduce((a, p) => a + p[1], 0) / 4;
     expect(cy).toBeCloseTo(200 - 46, 0);
-    expect(metal!.roof).toBe("gable");
+    expect(["gable", "hip"]).toContain(metal!.roof);
     expect(ringArea(metal!.ring)).toBeGreaterThan(0); // counter-clockwise
   });
 });
@@ -47,5 +47,45 @@ describe("building heights", () => {
     expect(buildingHeight({ building: "apartments", "building:levels": "4" })).toBe(13);
     expect(buildingHeight({ building: "house" })).toBe(3);
     expect(buildingHeight({ building: "shed" })).toBe(3.5);
+  });
+});
+
+describe("house roofs", async () => {
+  const { buildBuildings } = await import("../src/core/buildings");
+  // A 12 x 8 m house at ground level 10, front wall along y = 0 (facing south).
+  const ring: [number, number][] = [[0, 0], [12, 0], [12, 8], [0, 8]];
+  const house = (roof: "hip" | "gable", garage = false) =>
+    buildBuildings([{ ring, height: 2.8, roof, roofColour: 0, facade: 0, source: "frontage", front: [[0, 0], [12, 0]], garage }], () => 10);
+  const verts = (nodes: ReturnType<typeof house>, re: RegExp) => nodes.filter((n) => re.test(n.name)).flatMap((n) =>
+    Array.from({ length: n.positions.length / 3 }, (_, i) => [n.positions[i * 3], -n.positions[i * 3 + 2], n.positions[i * 3 + 1]]));
+
+  it("overhangs the walls with eaves and rises to a ridge at the pitch", () => {
+    for (const roof of ["hip", "gable"] as const) {
+      const v = verts(house(roof), /^ROOF_/);
+      expect(Math.min(...v.map((p) => p[0]))).toBeCloseTo(-0.45, 2);
+      expect(Math.max(...v.map((p) => p[1]))).toBeCloseTo(8.45, 2);
+      expect(Math.max(...v.map((p) => p[2]))).toBeCloseTo(12.8 + 4 * Math.tan((22 * Math.PI) / 180), 2);
+    }
+  });
+
+  it("shortens the ridge on a hip roof, runs it to the eaves on a gable", () => {
+    const top = (roof: "hip" | "gable") => {
+      const v = verts(house(roof), /^ROOF_/);
+      const zMax = Math.max(...v.map((p) => p[2]));
+      const ridge = v.filter((p) => p[2] > zMax - 1e-3).map((p) => p[0]);
+      return Math.max(...ridge) - Math.min(...ridge);
+    };
+    expect(top("hip")).toBeCloseTo(12 - 8, 2);
+    expect(top("gable")).toBeCloseTo(12 + 0.9, 2);
+  });
+
+  it("puts soffits under the eaves, facing down, and a garage door on the street side", () => {
+    const nodes = house("hip", true);
+    const soffit = nodes.find((n) => n.name.startsWith("SOFFIT_"))!;
+    for (let i = 1; i < soffit.normals.length; i += 3) expect(soffit.normals[i]).toBeLessThan(0);
+    const door = verts(nodes, /^GARAGE_/);
+    expect(door.length).toBeGreaterThan(0);
+    for (const p of door) expect(p[1]).toBeLessThan(0); // just proud of the front (south) wall
+    expect(Math.max(...door.map((p) => p[2])) - 10).toBeCloseTo(2.1, 2);
   });
 });
