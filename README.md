@@ -140,6 +140,8 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
 | `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |
 | `src/core/cameras.ts` | Replay cameras (`cameras_1.ini`) |
+| `src/core/utilities.ts` | Power poles, overhead wires and street lights (Mapillary, OSM, or default lights in town) |
+| `src/core/footpaths.ts` | Footpaths, driveway crossovers, kerb laybacks and letterboxes read off the aerial photo |
 | `src/core/cull.ts` | Splits wide meshes into tiles and sets draw distances, so the game can skip what's out of sight |
 | `src/core/track.ts` | The whole pipeline; network access is injected |
 | `src/services/` | OSRM, Photon/Nominatim, Overpass, OpenFreeMap vector tiles, tile fetching (browser only) |

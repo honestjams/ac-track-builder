@@ -11,27 +11,22 @@ Rough priority order. Each chunk is a self-contained change.
    whatever it turns up.
 2. ~~U-turn spurs~~ (cut out of the route automatically) and ~~the ditch
    along road edges~~ (terrain ramps up to the verge or kerb). Done.
-3. **Photo trace and angled parking.** On wide main streets the trace can
-   take parking bays as road and pull the line sideways. Detect it (traced
-   width far beyond the street's, one edge where OSM expects it) and trust
-   that edge; keep `noTrace` zones as the manual override, settable from the
-   map.
-4. **Performance pass.** Count draw calls, triangles and texture memory in
-   a typical build; merge small meshes by material, cap far-off detail, so a
-   time trial runs at a steady frame rate on modest PCs.
-5. **Replay and TV cameras** (`data/cameras_1.ini`) along the route, so a
-   saved hotlap replay looks like a broadcast.
+3. ~~Photo trace walking off onto grey roofs and parking~~, ~~performance
+   pass~~ (wide meshes split into tiles, draw distances on small detail),
+   ~~replay cameras~~. Done. Still open: setting `noTrace` zones from the map.
 
 ## Next: realism
 
-6. **Road furniture from OSM and photos.** Power poles along streets (an
-   Australian signature), street lights at mapped lamp positions (and CSP
-   night lighting), bus stops, letterboxes along frontages.
-7. **Painted words and symbols.** KEEP CLEAR, BUS, bicycle symbols, from
-   Mapillary detections where available.
-8. **Footpaths** as their own surface beside the kerb.
-9. **Scenery.** Tree trunk collision, more tree species per region, multi-lane
-   roundabouts, CSP grass FX on grassy terrain.
+6. ~~Power poles, wires, street lights; footpaths, driveways, laybacks,
+   letterboxes; painted words; houses with hip roofs, eaves, doors and
+   garages; gum trees and palms.~~ Done.
+7. **Close-range ground.** The aerial photo on nature strips and yards is a
+   blur from the driver's seat. A grass detail texture through AC's
+   detail-map shader would fix it, but needs an in-game test first.
+8. **CSP night lighting** for the street lights (positions are already
+   known), and bicycle symbols.
+9. **Scenery.** Front fences, tree trunk collision, multi-lane roundabouts,
+   CSP grass FX on grassy terrain.
 
 ## Later
 
