@@ -29,7 +29,7 @@ import {
 import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, pointInRing, type Building } from "./buildings";
 import { camerasIni, placeCameras } from "./cameras";
 import { cullable } from "./cull";
-import { extConfig } from "./nightLights";
+import { extConfig } from "./cspConfig";
 import { buildBarriers } from "./fences";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";

@@ -144,7 +144,7 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/utilities.ts` | Power poles, overhead wires and street lights (Mapillary, OSM, or default lights in town) |
 | `src/core/footpaths.ts` | Footpaths, driveway crossovers, kerb laybacks and letterboxes read off the aerial photo |
 | `src/core/fences.ts` | Fences, garden walls and hedges from OSM, kept off the road |
-| `src/core/nightLights.ts` | CSP night lighting for the street lights (`extension/ext_config.ini`) |
+| `src/core/cspConfig.ts` | Custom Shaders Patch config (`extension/ext_config.ini`): night lighting for the street lights, Grass FX |
 | `src/core/cull.ts` | Splits wide meshes into tiles and sets draw distances, so the game can skip what's out of sight |
 | `src/core/track.ts` | The whole pipeline; network access is injected |
 | `src/services/` | OSRM, Photon/Nominatim, Overpass, OpenFreeMap vector tiles, tile fetching (browser only) |

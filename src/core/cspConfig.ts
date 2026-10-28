@@ -1,8 +1,14 @@
-// Night lighting for Custom Shaders Patch: extension/ext_config.ini in the
-// track folder. Every street light becomes a real light pointing down from
-// its lantern, and the lanterns glow, both switched on by a smooth night
-// condition (the sun below 88 degrees from overhead, as CSP's own configs
-// define it). Without CSP the file is ignored.
+// Custom Shaders Patch config: extension/ext_config.ini in the track folder.
+// Without CSP the file is ignored.
+//
+// - Night lighting: every street light becomes a real light pointing down
+//   from its lantern, and the lanterns glow, both switched on by a smooth
+//   night condition (the sun more than 88 degrees from overhead, as CSP's own
+//   configs define it).
+// - Grass FX: real 3D grass blades, close to the camera, on the grassy parts
+//   of the aerial photo (terrain, nature strips): the photo alone is a blur
+//   from the driver's seat. Road, concrete and paint occlude it so nothing
+//   grows through the asphalt (the terrain under the road sits below it).
 //
 // Syntax follows CSP's track configs (acc-extension-config: Tracks - Lights,
 // Tracks - Conditions, and its shipped configs for Kunos tracks).
@@ -21,6 +27,10 @@ export function extConfig(lights: Vec3[]): string {
     "INPUT = SUN",
     "LUT = (|0=0|88=0|88=1|180=1)",
     "LAG = 0.97",
+    "",
+    "[GRASS_FX]",
+    "GRASS_MATERIALS = terrain_?, strip_photo_?, sidestrips_photo, returns_photo, grass",
+    "OCCLUDING_MATERIALS = road_?, concrete, paint?, rrpm, barrier_?",
     "",
   ];
   if (lights.length) {

@@ -20,13 +20,13 @@ Rough priority order. Each chunk is a self-contained change.
 6. ~~Power poles, wires, street lights; footpaths, driveways, laybacks,
    letterboxes; painted words; houses with hip roofs, eaves, doors and
    garages; gum trees and palms.~~ Done.
-7. **Close-range ground.** The aerial photo on nature strips and yards is a
-   blur from the driver's seat. A grass detail texture through AC's
-   detail-map shader would fix it, but needs an in-game test first.
-8. **CSP night lighting** for the street lights (positions are already
-   known), and bicycle symbols.
-9. **Scenery.** Front fences, tree trunk collision, multi-lane roundabouts,
-   CSP grass FX on grassy terrain.
+7. ~~CSP night lighting, CSP Grass FX on lawns and strips, bicycle
+   symbols, fences/walls/hedges from OSM, solid tree trunks, no-trace zones
+   from the map.~~ Done.
+8. **Close-range ground without CSP.** A grass detail texture through AC's
+   detail-map shader; its parameters need checking in game first.
+9. **Scenery.** Multi-lane roundabouts, front fences where OSM has none
+   (read off the photo), house windows lit at night.
 
 ## Later
 
