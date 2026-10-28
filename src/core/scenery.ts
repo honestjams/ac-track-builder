@@ -140,6 +140,23 @@ export function filterTrees(spots: TreeSpot[], index: SegmentIndex, opts: BuildO
   return Array.from({ length: max }, (_, i) => kept[Math.floor(i * step)]);
 }
 
+/** Trunk width at scale 1 per sprite (broadleaf, conifer, eucalypt, palm), metres. */
+const TRUNK = [0.4, 0.32, 0.45, 0.3];
+
+/**
+ * Solid trunks: an invisible box at each tree for the physics (1WALL_), so a
+ * car that leaves the road hits the tree rather than driving through it.
+ */
+export function treeTrunks(spots: TreeSpot[], ground: HeightFn): Kn5MeshNode[] {
+  const out = new ChunkedMesh(20);
+  for (const t of spots) {
+    const w = Math.max(0.2, TRUNK[t.variant] * t.scale);
+    const z = ground(t.x, t.y);
+    box(out.next(), [t.x, t.y], [1, 0], w, w, z - 0.5, z + 3);
+  }
+  return out.all().map((mb, i) => mb.toKn5(`1WALL_TREE_${pad(i)}`, "wall", { renderable: false, castShadows: false }));
+}
+
 const TREE_PLANES = 3;
 const TREE_VERTS = TREE_PLANES * 8;
 

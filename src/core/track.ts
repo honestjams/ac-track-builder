@@ -24,7 +24,7 @@ import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
 import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
-  buildGuardRails, buildGuidePosts, buildTrees, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
+  buildGuardRails, buildGuidePosts, buildTrees, treeTrunks, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
 import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, pointInRing, type Building } from "./buildings";
 import { camerasIni, placeCameras } from "./cameras";
@@ -709,7 +709,9 @@ export async function buildTrack(
   await progress("Placing scenery");
   const offRings = (spots: TreeSpot[]) => spots.filter((t) => !inRoundabout(plan, t.x, t.y, opts.vergeWidth + 3));
   const offStreets = (spots: TreeSpot[]) => spots.filter((t) => streetIndex.clearance(t.x, t.y) > 1.5);
-  const trees = buildTrees(offStreets(offRings(filterTrees(treeSpots, index, opts, opts.maxTrees))), ground);
+  const treesKept = offStreets(offRings(filterTrees(treeSpots, index, opts, opts.maxTrees)));
+  const trees = buildTrees(treesKept, ground);
+  const trunks = treeTrunks(treesKept, ground);
   // A tree and a ring of shrubs on each island big enough for them.
   const islandTrees = plan.roundabouts.flatMap((rb) => {
     const ri = innerRadius(rb);
@@ -804,7 +806,7 @@ export async function buildTrack(
       ]),
       // Already in compact chunks (terrain, horizon), or never drawn (walls).
       group("TERRAIN", terrainNodes),
-      group("WALLS", walls),
+      group("WALLS", [...walls, ...trunks]),
       group("HORIZON", backdropNodes),
       ...trackObjects(plan, opts),
     ]),
