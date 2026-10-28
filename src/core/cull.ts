@@ -9,6 +9,8 @@ import type { Kn5MeshNode, Kn5Node } from "./kn5";
 
 /** Tile size for splitting, metres. */
 export const CELL = 120;
+/** Meshes with fewer triangles than this aren't worth splitting. */
+const MIN_TRIS = 1500;
 
 /** Draw distances for small detail, by mesh name. Physics meshes (named 1...) are left alone. */
 const DRAW_DISTANCE: [RegExp, number][] = [
@@ -35,7 +37,8 @@ export function spread(node: Kn5MeshNode): number {
  * A mesh that already fits in a couple of tiles comes back as it was.
  */
 export function splitByArea(node: Kn5MeshNode, cell = CELL): Kn5MeshNode[] {
-  if (spread(node) <= cell * 2) return [node];
+  // A few hundred triangles cost less to draw than the extra draw calls of splitting them.
+  if (node.indices.length / 3 < MIN_TRIS || spread(node) <= cell * 2) return [node];
   const p = node.positions, idx = node.indices;
   const tiles = new Map<string, number[]>();
   for (let t = 0; t < idx.length; t += 3) {
@@ -92,8 +95,10 @@ export function cullable(nodes: Kn5Node[], cell = CELL): Kn5Node[] {
     if (n.kind !== "mesh") return [{ ...n, children: cullable(n.children, cell) }];
     if (n.renderable === false) return [n];
     return splitByArea(n, cell).map((m) => {
+      // The game measures the draw distance to the middle of the mesh, so
+      // only a compact mesh gets one: a long one would vanish under the car.
       const d = drawDistance(m.name);
-      return d && !m.lodOut ? { ...m, lodOut: d } : m;
+      return d && !m.lodOut && spread(m) < d / 4 ? { ...m, lodOut: d } : m;
     });
   });
 }

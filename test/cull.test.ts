@@ -20,7 +20,7 @@ function row(name: string, count: number, gap: number): Kn5MeshNode {
 
 describe("culling", () => {
   it("splits a mesh strung along the road into compact tiles, keeping every triangle", () => {
-    const long = row("FURNITURE_STEEL_000", 100, 20); // 2 km of posts
+    const long = row("FURNITURE_STEEL_000", 1000, 2); // 2 km of posts, one every 2 m
     const tiles = splitByArea(long);
     expect(tiles.length).toBeGreaterThan(10);
     expect(tiles.reduce((s, t) => s + t.indices.length, 0)).toBe(long.indices.length);
@@ -31,9 +31,16 @@ describe("culling", () => {
     }
   });
 
-  it("leaves compact meshes as they are", () => {
+  it("leaves compact meshes, and small ones, as they are", () => {
     const short = row("FURNITURE_STEEL_000", 5, 20);
     expect(splitByArea(short)).toEqual([short]);
+    const sparse = row("FURNITURE_STEEL_000", 100, 20); // 2 km long but only 200 triangles
+    expect(splitByArea(sparse)).toEqual([sparse]);
+  });
+
+  it("never gives a long mesh a draw distance (it would vanish with the car on it)", () => {
+    const [long] = cullable([row("MARKINGS_000", 100, 20)]) as Kn5MeshNode[];
+    expect(long.lodOut).toBeUndefined();
   });
 
   it("gives small detail a draw distance, but not physics meshes or invisible walls", () => {
