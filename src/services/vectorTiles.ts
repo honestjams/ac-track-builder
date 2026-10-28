@@ -2,6 +2,7 @@
 // render heights, and road class / surface along the route. Served from a
 // CDN, keyless, so unlike the public Overpass servers it is reliably up.
 
+import { fetchRetry, warnMissing } from "./dataWarnings";
 import { VectorTile } from "@mapbox/vector-tile";
 import { PbfReader } from "pbf";
 import { lngLatToPixel, pixelToLngLat, type LngLat } from "../core/geo";
@@ -12,8 +13,11 @@ const Z = 14;
 let template: Promise<string> | null = null;
 
 function tileTemplate(): Promise<string> {
-  template ??= fetch(TILEJSON)
-    .then((r) => r.json())
+  template ??= fetchRetry(TILEJSON)
+    .then((r) => {
+      if (!r?.ok) throw new Error("map tile index unavailable");
+      return r.json();
+    })
     .then((j) => j.tiles[0] as string)
     .catch((e) => {
       template = null;
@@ -104,11 +108,15 @@ export async function fetchTileFeatures(bbox: [number, number, number, number]):
   const names: TileName[] = [];
   const pois: TilePoi[] = [];
   const jobs: Promise<void>[] = [];
+  let missing = 0;
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
       jobs.push((async () => {
-        const r = await fetch(url.replace("{z}", String(Z)).replace("{x}", String(tx)).replace("{y}", String(ty)));
-        if (!r.ok) return;
+        const r = await fetchRetry(url.replace("{z}", String(Z)).replace("{x}", String(tx)).replace("{y}", String(ty)));
+        if (!r?.ok) {
+          if (r?.status !== 404) missing++;
+          return;
+        }
         const tile = new VectorTile(new PbfReader(new Uint8Array(await r.arrayBuffer())));
         const toLngLat = (p: P, extent: number): LngLat => pixelToLngLat([(tx + p.x / extent) * 256, (ty + p.y / extent) * 256], Z);
         const bl = tile.layers.building;
@@ -161,6 +169,7 @@ export async function fetchTileFeatures(bbox: [number, number, number, number]):
     }
   }
   await Promise.all(jobs);
+  if (missing) warnMissing(`${missing} map tiles (buildings, streets, shops)`);
   return { buildings, roads, names, pois };
 }
 

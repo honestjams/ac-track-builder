@@ -3,6 +3,7 @@
 // responsive, or on the page itself where workers can't draw (no
 // OffscreenCanvas).
 
+import { clearDataWarnings, dataWarnings, warnMissing } from "./dataWarnings";
 import type { LngLat } from "../core/geo";
 import type { BuildOptions } from "../core/options";
 import type { RoundaboutHint } from "../core/roundabout";
@@ -34,6 +35,8 @@ export interface BuildOutcome {
   widthFallback: boolean;
   seen: number;
   seenError: string;
+  /** Data that never arrived after retries (an API down, tiles that failed): the track built without it. */
+  missing: string[];
 }
 
 export type Report = (stage: string, fraction?: number) => Promise<void>;
@@ -46,10 +49,14 @@ export async function runBuild(job: BuildJob, report: Report, traceProgress: (te
   const chain = imageryChain(coords[Math.floor(coords.length / 2)], job.imagerySource);
 
   await report("Fetching OpenStreetMap data");
+  clearDataWarnings();
   let seenError = "";
   const [osm, tiles, seen] = await Promise.all([
     fetchOsm(coords),
-    fetchTileFeatures(paddedBounds(coords, (opts.buildingRadius ?? 250) + 50)).catch(() => null),
+    fetchTileFeatures(paddedBounds(coords, (opts.buildingRadius ?? 250) + 50)).catch(() => {
+      warnMissing("all map tiles (buildings, streets, shops)");
+      return null;
+    }),
     token
       ? fetchSeen(paddedBounds(coords, (opts.corridor ?? 90) + 20), token).catch((e) => {
         seenError = (e as Error).message;
@@ -85,6 +92,7 @@ export async function runBuild(job: BuildJob, report: Report, traceProgress: (te
     widthFallback: !widthAt && !opts.widthOverride,
     seen: seen.length,
     seenError,
+    missing: [...dataWarnings],
   };
 }
 
