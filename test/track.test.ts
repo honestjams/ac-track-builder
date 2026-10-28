@@ -44,6 +44,7 @@ describe("buildTrack (synthetic terrain)", async () => {
     expect(names).toEqual([
       "test_hairpin/README.txt",
       "test_hairpin/ai/fast_lane.ai",
+      "test_hairpin/data/cameras_1.ini",
       "test_hairpin/data/map.ini",
       "test_hairpin/data/surfaces.ini",
       "test_hairpin/map.png",

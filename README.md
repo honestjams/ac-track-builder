@@ -139,6 +139,7 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/roundabout.ts` | Roundabout circles, ring carriageway, island, connectors |
 | `src/core/aiLine.ts` | AI line with a grip-limited speed profile |
 | `src/core/acFiles.ts` | `ui_track.json`, `surfaces.ini`, `map.ini`/`map.png`, outline, preview |
+| `src/core/cameras.ts` | Replay cameras (`cameras_1.ini`) |
 | `src/core/track.ts` | The whole pipeline; network access is injected |
 | `src/services/` | OSRM, Photon/Nominatim, Overpass, OpenFreeMap vector tiles, tile fetching (browser only) |
 | `src/ui/` | Map UI and three.js preview |

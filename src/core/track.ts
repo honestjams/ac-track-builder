@@ -26,7 +26,8 @@ import { FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, grass
 import {
   buildGuardRails, buildGuidePosts, buildTrees, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
-import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, type Building } from "./buildings";
+import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, pointInRing, type Building } from "./buildings";
+import { camerasIni, placeCameras } from "./cameras";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, gateSigns, landmarks, seenFeatures, streetSigns } from "./furniture";
@@ -778,12 +779,14 @@ export async function buildTrack(
   if (plan.closed) outline2d.push(outline2d[0]);
   const map = trackMap(outline2d);
   const meanWidth = plan.samples.reduce((a, s) => a + s.width, 0) / plan.samples.length;
+  const cameras = placeCameras(plan, opts, (x, y) => terrainAt(x, y).h, (x, y) => kept.some((b) => pointInRing(x, y, b.ring)));
   const trackMeta: TrackMeta = { name: opts.name, ...meta };
   const files: Record<string, Uint8Array> = {
     [`${slug}/${slug}.kn5`]: kn5,
     [`${slug}/ai/fast_lane.ai`]: ai,
     [`${slug}/data/surfaces.ini`]: enc.encode(surfacesIni()),
     [`${slug}/data/map.ini`]: enc.encode(map.ini),
+    [`${slug}/data/cameras_1.ini`]: enc.encode(camerasIni(cameras)),
     [`${slug}/map.png`]: map.png,
     [`${slug}/ui/ui_track.json`]: enc.encode(uiTrackJson(trackMeta, {
       length: timedLength(), width: meanWidth, pitboxes: opts.pitCount, closed: plan.closed, centre,
