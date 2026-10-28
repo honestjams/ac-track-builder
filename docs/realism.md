@@ -56,8 +56,18 @@ writer looks them up (`TEXTURE_REGISTER` in `kn5.ts`).
   alpha mask from its colour (0 on lawns, dry grass and bare earth; 255 on
   roofs, roads, concrete, water), grass blades as the detail (~0.9 m a
   tile).
+- **Road relief**: each seal texture's normal map comes from its own
+  shading, brightness as height, so cracks and patch edges are grooves
+  (DirectX convention, green down).
+- **Walls, roofs, fences** (`facade_*`, `roof_*`, `barrier_*`):
+  `ksPerPixelNM` with a normal map from the texture's shading: mortar
+  joints, weatherboard laps, corrugations, palings. Reflections off.
+- **Windows**: glass panes over the painted windows (`window` material),
+  which CSP turns into lit rooms at night.
 - Turned off with **Detail shaders** in the options, everything is plain
-  `ksPerPixel` as before.
+  `ksPerPixel` as before. The cost is file size: the ground's grass mask
+  needs DXT5 (alpha) instead of DXT1, about 25 MB more on a 1.8 km
+  suburban build at high imagery.
 
 ## Custom Shaders Patch
 
@@ -93,8 +103,6 @@ Most players run CSP. A track can ship its own config at
   CSP's AO bakery (any hardware), so the README tells players how.
 - **`ksMultilayer` terrain**: four details by mask (grass, dirt, gravel,
   concrete) instead of one.
-- **Normal maps** from the seal texture's height (cracks, patches) and for
-  brick and weatherboard walls.
 
 ## Sources
 
