@@ -637,3 +637,18 @@ export function grassAlpha(rgba: Uint8Array | Uint8ClampedArray, w: number, h: n
   }
   return out;
 }
+
+/**
+ * Window glass: the sky reflected at the top, darker below, a hint of a
+ * curtain behind. One window per texture.
+ */
+export function windowTexture(): Uint8Array {
+  const w = 64, h = 64;
+  const r = rng(411);
+  return encodePng(fill(w, h, (x, y) => {
+    const t = y / h, n = (r() - 0.5) * 6;
+    const sky = [150 - t * 95, 165 - t * 100, 180 - t * 100];
+    const curtain = (x < 10 || x > 54) && t < 0.85 ? 0.35 : 0;
+    return [sky[0] + (214 - sky[0]) * curtain + n, sky[1] + (204 - sky[1]) * curtain + n, sky[2] + (184 - sky[2]) * curtain + n];
+  }), w, h, { alpha: false });
+}

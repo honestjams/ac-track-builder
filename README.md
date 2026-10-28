@@ -98,6 +98,30 @@ it into `steamapps/common/assettocorsa/content/tracks/`. The zip contains one
 folder (`<track>/` with `ui/`, `data/`, `ai/` and the `.kn5`), so nothing ends
 up nested too deep.
 
+## Making it look its best in game
+
+The track works in plain Assetto Corsa. With
+[Custom Shaders Patch](https://acstuff.ru/patch/) (CSP) it also reads the
+track's `extension/ext_config.ini`, so turn these on in CSP's settings:
+
+- **Lighting FX**: the street lights light the road at night, lanterns glow,
+  house windows show lit rooms, and a built-up area glows on the skyline.
+- **Grass FX**: real grass blades on lawns and nature strips near the car,
+  where the aerial photo alone is a blur.
+- **Rain FX**: puddles and soaked asphalt, darker concrete, slippery paint.
+
+Ambient occlusion makes the biggest single difference to how solid a scene
+looks (soft shadow where walls meet the ground, under eaves, along kerbs).
+It is baked per track on your PC with CSP's
+[vertex AO bakery](https://github.com/ac-custom-shaders-patch/acc-bakeryoptix)
+(needs an NVIDIA GPU): put the track in `content/tracks`, run the bakery on
+its folder, and it writes a `.vao-patch` file next to the `.kn5` that CSP
+loads automatically.
+
+If the road or the grass looks wrong up close (too dark, shiny or black),
+untick **Detail shaders** and build again: that goes back to plain
+textures.
+
 ## How a build works
 
 ```
@@ -144,7 +168,7 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/utilities.ts` | Power poles, overhead wires and street lights (Mapillary, OSM, or default lights in town) |
 | `src/core/footpaths.ts` | Footpaths, driveway crossovers, kerb laybacks and letterboxes read off the aerial photo |
 | `src/core/fences.ts` | Fences, garden walls and hedges from OSM, kept off the road |
-| `src/core/cspConfig.ts` | Custom Shaders Patch config (`extension/ext_config.ini`): night lighting for the street lights, Grass FX |
+| `src/core/cspConfig.ts` | Custom Shaders Patch config (`extension/ext_config.ini`): night lighting, lit windows, light pollution, Grass FX, Rain FX, shadow fixes |
 | `src/core/cull.ts` | Splits wide meshes into tiles and sets draw distances, so the game can skip what's out of sight |
 | `src/core/track.ts` | The whole pipeline; network access is injected |
 | `src/services/` | OSRM, Photon/Nominatim, Overpass, OpenFreeMap vector tiles, tile fetching (browser only) |

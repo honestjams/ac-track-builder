@@ -95,4 +95,23 @@ describe("house roofs", async () => {
     // And a front door.
     expect(verts(nodes, /^DOOR_/).length).toBe(4);
   });
+
+  it("puts glass panes over the painted windows, clear of the garage and front door", () => {
+    const nodes = house("hip", true);
+    const panes = nodes.filter((n) => n.name.startsWith("WINDOWS_"));
+    expect(panes.length).toBeGreaterThan(0);
+    const v = verts(panes, /./);
+    for (const [x, y, z] of v) {
+      expect(z).toBeGreaterThan(10.9); // sills above 0.9 m
+      expect(z).toBeLessThan(12.8); // under the eaves
+      // On the front (south) wall, never over the garage (0.4-3.4 m from its start).
+      if (y < 0) expect(x < 0.4 || x > 3.4).toBe(true);
+    }
+    // Every pane is just proud of a wall: within 2 cm outside the footprint.
+    for (const [x, y] of v) {
+      const outside = Math.max(-x, x - 12, -y, y - 8);
+      expect(outside).toBeGreaterThan(0.005);
+      expect(outside).toBeLessThan(0.02);
+    }
+  });
 });

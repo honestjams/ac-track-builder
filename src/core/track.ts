@@ -22,7 +22,7 @@ import { photoRoadTexture } from "./photoSurface";
 import { encodeDdsDxt1, encodeDdsDxt5 } from "./dds";
 import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { BARRIERS, barrierTexture, detailTexture, flatNormalTexture, grassAlpha, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { BARRIERS, barrierTexture, detailTexture, windowTexture, flatNormalTexture, grassAlpha, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
   buildGuardRails, buildGuidePosts, buildTrees, treeTrunks, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
@@ -389,6 +389,7 @@ export async function buildTrack(
   addScenery("signal.png", solidTexture([28, 30, 26]), material("signal", "signal.png", { ambient: 0.4, diffuse: 0.4, specular: 0.2, exp: 20 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
   for (const b of BARRIERS) addScenery(`barrier_${b}.png`, barrierTexture(b), material(`barrier_${b}`, `barrier_${b}.png`, { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 15 }));
+  addScenery("window.png", windowTexture(), material("window", "window.png", { ambient: 0.35, diffuse: 0.3, specular: 0.6, exp: 80 }));
   addScenery("door.png", solidTexture([92, 62, 44]), material("door", "door.png", { ambient: 0.45, diffuse: 0.45, specular: 0.15, exp: 15 }));
   addScenery("garage.png", garageTexture(), material("garage", "garage.png", { ambient: 0.45, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("letterbox.png", solidTexture([168, 52, 40]), material("letterbox", "letterbox.png", { ambient: 0.45, diffuse: 0.45, specular: 0.25, exp: 25 }));
@@ -907,7 +908,11 @@ export async function buildTrack(
     [`${slug}/data/surfaces.ini`]: enc.encode(surfacesIni()),
     [`${slug}/data/map.ini`]: enc.encode(map.ini),
     [`${slug}/data/cameras_1.ini`]: enc.encode(camerasIni(cameras)),
-    [`${slug}/extension/ext_config.ini`]: enc.encode(extConfig(utilities.lights)),
+    [`${slug}/extension/ext_config.ini`]: enc.encode(extConfig(utilities.lights, {
+      // A town's glow at night where most of the route is built up.
+      builtUp: town.filter((t) => t >= 1).length > town.length / 2,
+      radiusKm: Math.max(...outline2d.map((p) => Math.hypot(p[0] - outline2d[0][0], p[1] - outline2d[0][1]))) / 2000,
+    })),
     [`${slug}/map.png`]: map.png,
     [`${slug}/ui/ui_track.json`]: enc.encode(uiTrackJson(trackMeta, {
       length: timedLength(), width: meanWidth, pitboxes: opts.pitCount, closed: plan.closed, centre,

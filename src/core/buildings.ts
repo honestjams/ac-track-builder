@@ -355,6 +355,55 @@ function frontage(
   panel(mesh.door, garage ? Math.min(len - 1.4, 4.2) : len / 3, 0.85, 2.05);
 }
 
+/**
+ * The windows painted in the facade texture (8 m by 3 m a storey): where
+ * they are along the 8 m pattern and how high above each storey's floor.
+ */
+const WINDOWS: { x0: number; x1: number; z0: number; z1: number }[] = [
+  { x0: 1.125, x1: 3.375, z0: 0.94, z1: 2.25 },
+  { x0: 5.31, x1: 6.56, z0: 1.44, z1: 2.25 },
+];
+
+/** Stretches of the street-facing wall taken by the garage and front door (see frontage()). */
+function frontReserved(b: Building, ring: Vec2[]): { edge: number; ranges: [number, number][] } {
+  if (!b.front || b.roof === "flat" || ring.length !== 4) return { edge: -1, ranges: [] };
+  const same = (a: Vec2, c: Vec2) => Math.hypot(a[0] - c[0], a[1] - c[1]) < 0.05;
+  const edge = ring.findIndex((p, i) => {
+    const q = ring[(i + 1) % ring.length];
+    return (same(p, b.front![0]) && same(q, b.front![1])) || (same(p, b.front![1]) && same(q, b.front![0]));
+  });
+  if (edge < 0) return { edge, ranges: [] };
+  const p = ring[edge], q = ring[(edge + 1) % ring.length];
+  const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+  const garage = b.garage && len >= 6;
+  const door = garage ? Math.min(len - 1.4, 4.2) : len / 3;
+  return { edge, ranges: [...(garage ? [[0.4, 3.4] as [number, number]] : []), [door - 0.3, door + 1.15]] };
+}
+
+/**
+ * Glass panes over the painted windows, a little proud of the wall, one
+ * window = one texture repeat (so CSP can put a room behind each at night).
+ */
+function windowPanes(cm: ChunkedMesh, p: Vec2, q: Vec2, u0: number, floor: number, top: number, skip: [number, number][]): void {
+  const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+  if (len < 1) return;
+  const d: Vec2 = [(q[0] - p[0]) / len, (q[1] - p[1]) / len];
+  const out: Vec2 = [d[1], -d[0]]; // right of p->q: outside, for a counter-clockwise ring
+  const start = u0 * 8; // metres into the facade pattern where this wall begins
+  for (let storey = floor; storey + 2.3 <= top; storey += 3) {
+    for (let period = Math.floor(start / 8) * 8; period < start + len; period += 8) {
+      for (const w of WINDOWS) {
+        const a = period + w.x0 - start, c = period + w.x1 - start;
+        if (a < 0.15 || c > len - 0.15 || storey + w.z1 > top - 0.05) continue;
+        if (skip.some(([s0, s1]) => a < s1 && c > s0)) continue;
+        const at = (m: number, z: number): Vec3 => [p[0] + d[0] * m + out[0] * 0.015, p[1] + d[1] * m + out[1] * 0.015, z];
+        face(cm.next(4), [at(a, storey + w.z0), at(c, storey + w.z0), at(c, storey + w.z1), at(a, storey + w.z1)],
+          (v) => [Math.hypot(v[0] - p[0], v[1] - p[1]) - a > (c - a) / 2 ? 1 : 0, v[2] > storey + (w.z0 + w.z1) / 2 ? 0 : 1]);
+      }
+    }
+  }
+}
+
 /** One flat polygon with an explicit normal. */
 function face(mb: MeshBuilder, pts: Vec3[], uv: (p: Vec3) => [number, number]): void {
   const [a, b, c] = pts;
@@ -378,6 +427,7 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
   const walls = FACADES.map(() => new ChunkedMesh(0));
   const roofs = ROOF_COLOURS.map(() => new ChunkedMesh(0));
   const soffits = new ChunkedMesh(0), garages = new ChunkedMesh(0), doors = new ChunkedMesh(0), drives = new ChunkedMesh(0);
+  const panes = new ChunkedMesh(0);
   for (const b of buildings) {
     const ring = ringArea(b.ring) < 0 ? b.ring.slice().reverse() : b.ring;
     const hs = ring.map(([x, y]) => ground(x, y));
@@ -386,7 +436,13 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
     const wm = walls[b.facade].next(ring.length * 4 + 8);
     const rm = roofs[b.roofColour].next(ring.length * 3 + 8);
     let u = 0;
-    for (let k = 0; k < ring.length; k++) u = wall(wm, ring[k], ring[(k + 1) % ring.length], base, top, u, Math.min(...hs));
+    const floor = Math.min(...hs);
+    const reserved = frontReserved(b, ring);
+    for (let k = 0; k < ring.length; k++) {
+      const p = ring[k], q = ring[(k + 1) % ring.length];
+      windowPanes(panes, p, q, u, floor, top, k === reserved.edge ? reserved.ranges : []);
+      u = wall(wm, p, q, base, top, u, floor);
+    }
     if (b.roof !== "flat" && ring.length === 4) {
       // Rotate so r[0]->r[1] is a long side (an eave).
       const l0 = Math.hypot(ring[1][0] - ring[0][0], ring[1][1] - ring[0][1]);
@@ -450,6 +506,7 @@ export function buildBuildings(buildings: Building[], ground: HeightFn): Kn5Mesh
   walls.forEach((cm, f) => cm.all().forEach((m, i) => out.push(m.toKn5(`1WALL_BLD_${FACADES[f]}_${pad(i)}`, `facade_${FACADES[f]}`))));
   roofs.forEach((cm, c) => cm.all().forEach((m, i) => out.push(m.toKn5(`ROOF_${ROOF_COLOURS[c].name}_${pad(i)}`, `roof_${ROOF_COLOURS[c].name}`))));
   soffits.all().forEach((m, i) => out.push(m.toKn5(`SOFFIT_${pad(i)}`, "canopy", { castShadows: false })));
+  panes.all().forEach((m, i) => out.push(m.toKn5(`WINDOWS_${pad(i)}`, "window", { castShadows: false })));
   garages.all().forEach((m, i) => out.push(m.toKn5(`GARAGE_${pad(i)}`, "garage", { castShadows: false })));
   doors.all().forEach((m, i) => out.push(m.toKn5(`DOOR_${pad(i)}`, "door", { castShadows: false })));
   drives.all().forEach((m, i) => out.push(m.toKn5(`DRIVEWAY_${pad(i)}`, "concrete", { castShadows: false })));
