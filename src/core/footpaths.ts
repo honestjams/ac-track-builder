@@ -12,6 +12,7 @@
 // Both are off the road for the physics (STREET: concrete, but not track),
 // and stand a few centimetres proud of the grass with a small edge.
 
+import type { Piece } from "./furniture";
 import type { Kn5MeshNode } from "./kn5";
 import { KERB_BACK } from "./kerbs";
 import { MeshBuilder } from "./mesh";
@@ -224,4 +225,29 @@ function slab(
   const down = (p: [number, number, number]): [number, number, number] => [p[0], p[1], p[2] - PROUD - 0.03];
   quad([down(a1), down(b1), b1, a1], [[1, va], [1, vb], [1, vb], [1, va]], !left);
   quad([a0, b0, down(b0), down(a0)], [[0, va], [0, vb], [0, vb], [0, va]], !left);
+}
+
+/**
+ * A letterbox beside each driveway, at the property line on the side the
+ * traffic comes from: a post and a box, the way nearly every house has one.
+ */
+export function letterboxes(
+  plan: RoadPlan,
+  vc: VergeConcrete,
+  groundAt: (x: number, y: number, fromEdge: number, s: RoadSample, side: 1 | -1) => number,
+): Piece[] {
+  const out: Piece[] = [];
+  for (const d of vc.drives) {
+    const k = d.side === 1 ? 0 : 1;
+    // Just before the driveway, as you drive along this side.
+    const i = d.side === 1 ? Math.max(0, d.i0 - 1) : Math.min(plan.samples.length - 1, d.i1 + 1);
+    const s = plan.samples[i];
+    const fromEdge = Math.max(d.d1, vc.paths[k][i]?.d1 ?? 0) + 0.4;
+    const t = (s.width / 2 + fromEdge) * d.side;
+    const at: [number, number] = [s.pos[0] + s.left[0] * t, s.pos[1] + s.left[1] * t];
+    const z = groundAt(at[0], at[1], fromEdge, s, d.side);
+    out.push({ kind: "box", at, along: s.tan, length: 0.09, depth: 0.09, z0: z - 0.3, z1: z + 0.95, material: "timber" });
+    out.push({ kind: "box", at, along: s.tan, length: 0.3, depth: 0.42, z0: z + 0.95, z1: z + 1.22, material: "letterbox" });
+  }
+  return out;
 }

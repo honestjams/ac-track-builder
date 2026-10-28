@@ -82,3 +82,20 @@ describe("footpaths and crossovers", () => {
     }
   });
 });
+
+describe("letterboxes", async () => {
+  const { letterboxes, readVerge: read } = await import("../src/core/footpaths");
+  it("stands one at the property line beside each driveway", () => {
+    const path: Vec2[] = Array.from({ length: 21 }, (_, i) => [i * 20, 0]);
+    const plan = planRoad(path, withDefaults({ widthOverride: 8 }));
+    plan.samples.forEach((s) => (s.h = 10));
+    const vc = read(plan, suburb(), [plan.samples.map(() => 1), plan.samples.map(() => 1)], 3);
+    const boxes = letterboxes(plan, vc, () => 10.15).filter((p) => p.kind === "box" && p.material === "letterbox");
+    expect(boxes).toHaveLength(vc.drives.length);
+    for (const b of boxes) {
+      if (b.kind !== "box") continue;
+      expect(b.at[1]).toBeGreaterThan(4 + 3); // behind the crossover, at the property line
+      expect(b.z0).toBeGreaterThan(10.9);
+    }
+  });
+});

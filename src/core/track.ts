@@ -33,7 +33,7 @@ import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, gateSigns, landmarks, mergeSightings, seenFeatures, streetSigns } from "./furniture";
 import { placeUtilities } from "./utilities";
-import { buildVergeConcrete, readVerge } from "./footpaths";
+import { buildVergeConcrete, letterboxes, readVerge } from "./footpaths";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
 import { applyTrace, displayOf, traceRoad, type RasterSampler, type TraceResult } from "./trace";
 import { buildSideStreets, LineIndex, traceSideStreets, planSideStreets, streetSurface, type StreetLine, type StreetName } from "./sideStreets";
@@ -347,6 +347,7 @@ export async function buildTrack(
   addScenery("lamp.png", solidTexture([150, 152, 150]), material("lamp", "lamp.png", { ambient: 0.45, diffuse: 0.45, specular: 0.3, exp: 30 }));
   addScenery("signal.png", solidTexture([28, 30, 26]), material("signal", "signal.png", { ambient: 0.4, diffuse: 0.4, specular: 0.2, exp: 20 }));
   addScenery("rail.png", railTexture(), material("rail", "rail.png", { ambient: 0.4, diffuse: 0.45, specular: 0.3, exp: 30 }));
+  addScenery("letterbox.png", solidTexture([168, 52, 40]), material("letterbox", "letterbox.png", { ambient: 0.45, diffuse: 0.45, specular: 0.25, exp: 25 }));
   addScenery("wire.png", solidTexture([38, 38, 40]), material("wire", "wire.png", { ambient: 0.35, diffuse: 0.35, specular: 0.2, exp: 20 }));
   addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("concrete.png", concreteTexture(), material("concrete", "concrete.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
@@ -608,9 +609,9 @@ export async function buildTrack(
   // Footpaths and driveway crossovers in the nature strip, where the photo shows them.
   const stripOuter = opts.vergeWidth + STRIP_EXTRA;
   const verge = opts.kerbs && raster ? readVerge(plan, raster, kerbs, stripOuter, (x, y) => streetIndex.clearance(x, y) < 0.5) : null;
-  const vergeConcrete = verge
-    ? buildVergeConcrete(plan, verge, (x, y, d, smp, side) => (d <= stripOuter ? surfaceHeight(smp, (side * smp.width) / 2, opts.crown) + KERB_H : terrainAt(x, y).h))
-    : [];
+  const vergeGround = (x: number, y: number, d: number, smp: RoadSample, side: 1 | -1) =>
+    d <= stripOuter ? surfaceHeight(smp, (side * smp.width) / 2, opts.crown) + KERB_H : terrainAt(x, y).h;
+  const vergeConcrete = verge ? buildVergeConcrete(plan, verge, vergeGround) : [];
   // Photo surface on the traced side streets too (the nearest 40, to keep the file in check).
   const photoStreets = new Set(
     opts.roadSurface === "photo" && raster
@@ -761,6 +762,7 @@ export async function buildTrack(
     ...seenFeatures((sources.seen ?? []).map((f) => ({ ...f, at: proj.toLocal(f.at) })), plan, index, opts, art),
     ...gateSigns(plan, opts, art),
     ...utilities.pieces,
+    ...(verge ? letterboxes(plan, verge, vergeGround) : []),
   ];
   let atlas = null;
   if (sources.renderArt && art.list.length) {
