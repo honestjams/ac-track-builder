@@ -37,6 +37,12 @@ Rough priority order. Each chunk is a self-contained change.
    shops, offices, warehouses, halls). Still open: front fences where OSM
    has none (read off the photo), balconies as geometry on apartments.
 
+9b. ~~**Race day.**~~ Barriers, debris fence and sponsor banners on the
+   start straight and the outside of tight corners, tyre walls, gantries,
+   grandstand and crowds, marshal posts (Done). Next: a pit lane and garages
+   where a car park or wide street allows, a full-circuit option that
+   closes the side streets.
+
 ## Later
 
 10. ~~**Build in a Web Worker** so the page stays responsive on long roads.~~ Done.

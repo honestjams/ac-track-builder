@@ -314,6 +314,98 @@ function boxFor(req: ArtRequest, measure: OffscreenCanvasRenderingContext2D): Bo
         },
       };
     }
+    case "banner": {
+      // A sponsor banner: the name across a band of its colour, a thin border.
+      const w = 768, h = 128;
+      return {
+        w, h, draw(ctx, x, y) {
+          ctx.fillStyle = req.colour ?? "#c8102e";
+          ctx.fillRect(x, y, w, h);
+          ctx.fillStyle = req.ink ?? "#fff";
+          ctx.fillRect(x, y + h - 10, w, 4);
+          ctx.fillRect(x, y + 6, w, 4);
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const t = text.toUpperCase();
+          const size = fitText(ctx, t, "italic bold", 88, w - 60);
+          ctx.font = `italic bold ${size}px ${FONT}`;
+          ctx.fillText(t, x + w / 2, y + h / 2 + 3);
+        },
+      };
+    }
+    case "feather": {
+      // A feather flag: rounded top, the name running up it.
+      const w = 128, h = 448;
+      return {
+        w, h, draw(ctx, x, y) {
+          ctx.beginPath();
+          ctx.moveTo(x + 6, y + h);
+          ctx.lineTo(x + 6, y + 70);
+          ctx.quadraticCurveTo(x + 10, y + 4, x + w - 4, y + 10);
+          ctx.lineTo(x + w - 18, y + h - 30);
+          ctx.closePath();
+          ctx.fillStyle = req.colour ?? "#c8102e";
+          ctx.fill();
+          ctx.save();
+          ctx.translate(x + w / 2 - 2, y + h / 2 + 20);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillStyle = req.ink ?? "#fff";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const t = text.toUpperCase();
+          const size = fitText(ctx, t, "italic bold", 56, h - 120);
+          ctx.font = `italic bold ${size}px ${FONT}`;
+          ctx.fillText(t, 0, 0);
+          ctx.restore();
+        },
+      };
+    }
+    case "lights": {
+      const w = 320, h = 128;
+      return {
+        w, h, draw(ctx, x, y) {
+          ctx.fillStyle = "#111";
+          roundRect(ctx, x, y, w, h, 10);
+          ctx.fill();
+          for (let r = 0; r < 2; r++) {
+            for (let i = 0; i < 5; i++) {
+              ctx.beginPath();
+              ctx.arc(x + 40 + i * 60, y + 36 + r * 56, 22, 0, Math.PI * 2);
+              ctx.fillStyle = r === 0 ? "#e0261b" : "#3a0d0b";
+              ctx.fill();
+            }
+          }
+        },
+      };
+    }
+    case "flag": {
+      const w = 160, h = 112;
+      const colours: Record<string, string> = { yellow: "#f4d000", green: "#1f9a3a", blue: "#1f4fbf" };
+      return {
+        w, h, draw(ctx, x, y) {
+          if (text === "chequered") {
+            for (let c = 0; c < 8; c++) {
+              for (let r = 0; r < 6; r++) {
+                ctx.fillStyle = (c + r) % 2 ? "#111" : "#f4f4f4";
+                ctx.fillRect(x + c * 20, y + r * 18.67, 20, 18.67);
+              }
+            }
+            return;
+          }
+          ctx.fillStyle = colours[text] ?? "#f4d000";
+          ctx.fillRect(x, y, w, h);
+          if (text === "blue") {
+            ctx.fillStyle = "#f4d000";
+            ctx.beginPath();
+            ctx.moveTo(x, y + h * 0.7);
+            ctx.lineTo(x + w, y + h * 0.2);
+            ctx.lineTo(x + w, y + h * 0.4);
+            ctx.lineTo(x, y + h * 0.9);
+            ctx.fill();
+          }
+        },
+      };
+    }
     case "back":
       return {
         w: 32, h: 32, draw(ctx, x, y) {

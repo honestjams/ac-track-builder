@@ -18,14 +18,20 @@ export type ArtKind =
   | "bus" // bus stop plate
   | "info" // blue square, text = short label
   | "back" // plain grey back of a sign
-  | "gate"; // timing gate sign: text = "START" or "FINISH"
+  | "gate" // timing gate sign: text = "START" or "FINISH"
+  | "banner" // sponsor banner, 6:1: text = the name, colour = background, ink = lettering
+  | "feather" // sponsor feather flag, tall and narrow: as banner
+  | "lights" // start lights: a row of five red lamps on a black panel
+  | "flag"; // marshal's flag: text = "yellow" | "green" | "blue" | "chequered"
 
 export interface ArtRequest {
   key: string;
   kind: ArtKind;
   text?: string;
-  /** CSS colour for "poi" panels. */
+  /** CSS colour for "poi" panels and sponsor backgrounds. */
   colour?: string;
+  /** CSS colour for sponsor lettering. */
+  ink?: string;
 }
 
 /** Where a piece of art sits in the atlas (UV, v = 0 at the top) and its shape. */

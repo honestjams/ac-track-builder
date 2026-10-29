@@ -385,6 +385,8 @@ function readOptions(): Partial<BuildOptions> {
     traceRoads: $<HTMLInputElement>("traceRoads").checked,
     kerbs: $<HTMLInputElement>("kerbs").checked,
     detailShaders: $<HTMLInputElement>("detailShaders").checked,
+    raceDress: $<HTMLInputElement>("raceDress").checked,
+    sponsors: $<HTMLInputElement>("sponsors").value,
     noTrace: zones.map((z) => ({ at: z.at, radius: ZONE_RADIUS })),
   };
 }
@@ -550,6 +552,7 @@ function showStats(r: TrackResult, widthFallback: boolean, usedImagery: ImageryS
     ["Signs", `${s.streetSigns} street, ${s.signs} other`],
     ["Poles & lights", `${s.poles} power poles, ${s.streetLights} street lights`],
     ["Guard rail", `${Math.round(s.railMetres)} m`],
+    ...(s.race ? [["Race day", `${s.race.barrierMetres.toLocaleString()} m of barriers${s.race.grandstand ? ", a grandstand" : ""}, ${s.race.spectators.toLocaleString()} spectators`] as [string, string]] : []),
     ["Triangles", s.triangles.toLocaleString()],
   ];
   $("result-stats").innerHTML = rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");

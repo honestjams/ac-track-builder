@@ -84,6 +84,17 @@ everything runs client-side: no server, no account, no queue.
   shop, cafe, church or school mapped inside it, the roof colour in the
   photo, its size and whether it fronts the street. Only the finishes a
   track uses go in its file.
+- Race-day dressing (Race day in the options): the start/finish straight and
+  the outside of each tight corner are dressed like a street circuit on race
+  weekend. Concrete barriers with a debris fence on top and sponsor banners
+  along it, wraps on the concrete, tyre walls through the corners, an
+  overhead start gantry with lights (a chequered one at a separate finish),
+  a grandstand full of people where there's room, spectators along the
+  fence, feather flags, and marshal posts with flags. Side streets stay
+  open, and the rest of the street is left as it is. Sponsors are an
+  editable list of names, drawn as text in each brand's colours (known
+  Australian motorsport brands get theirs). Real names are fine for your
+  own use; if you share a track publicly, consider made-up ones.
 - Invisible walls that keep you on the road and pull in where switchbacks
   pass close to each other.
 - Time trial ready: on an A-to-B road the timed section is exactly the road
@@ -196,6 +207,8 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/utilities.ts` | Power poles, overhead wires and street lights (Mapillary, OSM, or default lights in town) |
 | `src/core/footpaths.ts` | Footpaths, driveway crossovers, kerb laybacks and letterboxes read off the aerial photo |
 | `src/core/fences.ts` | Fences, garden walls and hedges from OSM, kept off the road |
+| `src/core/raceDress.ts` | Race-day dressing: barriers, debris fence, banners, tyre walls, gantries, grandstand, crowds, marshal posts |
+| `src/core/sponsors.ts` | The sponsor list and brand colours |
 | `src/core/cspConfig.ts` | Custom Shaders Patch config (`extension/ext_config.ini`): night lighting, lit windows, light pollution, Grass FX, Rain FX, shadow fixes |
 | `src/core/cull.ts` | Splits wide meshes into tiles and sets draw distances, so the game can skip what's out of sight |
 | `src/core/track.ts` | The whole pipeline; network access is injected |

@@ -36,6 +36,7 @@ import { buildBarriers } from "./fences";
 import { chunkPhotoSampler, frontageHouses } from "./frontage";
 import { ArtList, type ArtRenderer } from "./art";
 import { buildPieces, gateSigns, landmarks, mergeSightings, seenFeatures, streetSigns } from "./furniture";
+import { barrierConcreteTexture, catchFenceTexture, crowdTexture, raceDressing, tyreWallTexture } from "./raceDress";
 import { placeUtilities } from "./utilities";
 import { buildVergeConcrete, laybacks, letterboxes, readVerge } from "./footpaths";
 import { findLines, paintCandidates, type ImageLine } from "./paintLines";
@@ -133,6 +134,8 @@ export interface TrackResult {
     /** Power poles and street lights placed. */
     poles: number;
     streetLights: number;
+    /** Race-day dressing: metres of barrier, a grandstand or not, people. */
+    race: { barrierMetres: number; grandstand: boolean; spectators: number } | null;
     /** Footpath read off the photo, metres (both sides), and driveway crossovers. */
     footpathMetres: number;
     driveways: number;
@@ -1014,12 +1017,32 @@ export async function buildTrack(
   }, plan, index, opts, (i) => town[i], (x, y) => streetIndex.clearance(x, y) < 1 || kept.some((b) => pointInRing(x, y, b.ring)));
   // Signs and street furniture; their artwork is drawn in one atlas.
   const art = new ArtList();
+  // Race day: barriers, fences, banners, gantries, a grandstand and crowds where the road is the race.
+  const race = opts.raceDress ? raceDressing(plan, opts, art, {
+    ground,
+    blocked: (x, y) => {
+      const n = index.nearest(x, y, 30);
+      return (!!n && n.dist < index.at(n).width / 2 + 0.2) || streetIndex.clearance(x, y) < 0.8 || kept.some((b) => pointInRing(x, y, b.ring));
+    },
+  }, opts.sponsors) : null;
+  if (race) {
+    const plainLight = { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 };
+    addScenery("race_concrete.png", barrierConcreteTexture(), material("race_concrete", "race_concrete.png", plainLight));
+    addScenery("race_tyres.png", tyreWallTexture(), material("race_tyres", "race_tyres.png", { ambient: 0.4, diffuse: 0.4, specular: 0.1, exp: 15 }));
+    addScenery("marshal.png", solidTexture([236, 110, 24]), material("marshal", "marshal.png", plainLight));
+    const cutout = (name: string, png: Uint8Array, light = { ambient: 0.5, diffuse: 0.4, specular: 0.05, exp: 10 }) =>
+      addScenery(`${name}.png`, png, { ...material(name, `${name}.png`, light), shader: "ksPerPixelAT", alphaTested: true });
+    cutout("race_fence", catchFenceTexture(), { ambient: 0.45, diffuse: 0.45, specular: 0.3, exp: 30 });
+    cutout("race_crowd", crowdTexture(false));
+    cutout("race_spectators", crowdTexture(true));
+  }
   const pieces = [
     ...(opts.streetSigns ? streetSigns(streetPlan, plan, opts, art) : []),
     ...(opts.landmarks ? landmarks((sources.pois ?? []).map((p) => ({ ...p, at: proj.toLocal(p.at) })), plan, index, opts, art,
       (x, y) => Math.min(streetIndex.clearance(x, y), ...kept.map((b) => (pointInside(x, y, b.ring) ? -1 : Infinity)))) : []),
     ...seenFeatures((sources.seen ?? []).map((f) => ({ ...f, at: proj.toLocal(f.at) })), plan, index, opts, art),
-    ...gateSigns(plan, opts, art),
+    // The race gantries replace the plain START and FINISH signs.
+    ...(race ? race.pieces : gateSigns(plan, opts, art)),
     ...utilities.pieces,
     ...(verge ? letterboxes(plan, verge, vergeGround) : []),
   ];
@@ -1049,6 +1072,7 @@ export async function buildTrack(
         group("ROAD", roadMeshes.road),
         group("SIDESTREETS", sideStreets),
         group("FURNITURE", furniture),
+        group("RACE", race?.nodes ?? []),
         group("WIRES", utilities.wires),
         group("ROUNDABOUTS", [...ringsClear.nodes, ...shrubs, ...ringWalls]),
         group("MARKINGS", markings),
@@ -1130,6 +1154,7 @@ export async function buildTrack(
       footpathMetres: verge ? (verge.paths[0].filter(Boolean).length + verge.paths[1].filter(Boolean).length) * opts.spacing : 0,
       driveways: verge?.drives.length ?? 0,
       streetLights: utilities.lights.length,
+      race: race?.stats ?? null,
       streetSigns: pieces.filter((p) => p.kind === "blade").length,
       signs: pieces.filter((p) => p.kind === "face").length,
       railMetres: needs.reduce((n, side) => n + side.filter(Boolean).length * opts.spacing, 0),

@@ -1,6 +1,8 @@
 // Everything a build can be tuned by. Defaults aim at a two-lane mountain
 // road; the UI exposes the ones people actually change.
 
+import { DEFAULT_SPONSORS } from "./sponsors";
+
 export interface BuildOptions {
   /** Track name shown in Content Manager. */
   name: string;
@@ -99,6 +101,14 @@ export interface BuildOptions {
    * and grass on the aerial photo's lawns, sharp up close.
    */
   detailShaders: boolean;
+  /**
+   * Race-day dressing: barriers, debris fence and sponsor banners along the
+   * start/finish straight and the outside of tight corners, tyre walls,
+   * gantries, a grandstand and spectators, marshal posts.
+   */
+  raceDress: boolean;
+  /** Sponsors on the banners and flags, comma-separated. */
+  sponsors: string;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {
@@ -142,6 +152,8 @@ export const DEFAULT_OPTIONS: BuildOptions = {
   noTrace: [],
   kerbs: true,
   detailShaders: true,
+  raceDress: true,
+  sponsors: DEFAULT_SPONSORS,
 };
 
 export function withDefaults(partial: Partial<BuildOptions>): BuildOptions {
