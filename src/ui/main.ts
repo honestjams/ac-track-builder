@@ -1,18 +1,17 @@
 import "leaflet/dist/leaflet.css";
 import "./style.css";
 import L from "leaflet";
-import type { LngLat } from "../core/geo";
-import { buildTrack, type TrackResult } from "../core/track";
+import { LocalProjection, type LngLat } from "../core/geo";
+import type { TrackResult } from "../core/track";
 import { zipTrack } from "../core/zip";
 import type { BuildOptions } from "../core/options";
-import { fetchOsm, reverseGeocode, route, widthLookup, searchPlaces, type Place, type Route } from "../services/osm";
-import { DEM_CREDIT, DEM_LABEL, IMAGERY, imageryChain, loadChunkImagery, loadDem, tileUrl, type DemSource, type ImagerySource } from "../services/tiles";
+import { reverseGeocode, route, searchPlaces, type Place, type Route } from "../services/osm";
+import { DEM_LABEL, IMAGERY, tileUrl, type DemSource, type ImagerySource } from "../services/tiles";
 import { createPreview, type PreviewScene } from "./preview";
-import { renderArt } from "../services/art";
-import { loadRouteRaster } from "../services/raster";
-import { fetchSeen, savedToken, saveToken } from "../services/mapillary";
+import { savedToken, saveToken } from "../services/mapillary";
 import { decodeSession, encodeSession } from "./session";
-import { classWidths, fetchTileFeatures, roadClassLookup } from "../services/vectorTiles";
+import { runBuild, type BuildJob, type BuildOutcome, type Report as BuildReport } from "../services/pipeline";
+import type { WorkerMessage } from "./buildWorker";
 
 const MAX_KM = 30;
 
@@ -390,13 +389,6 @@ function readOptions(): Partial<BuildOptions> {
   };
 }
 
-/** [west, south, east, north] around the route, padded by `metres`. */
-function paddedBounds(coords: LngLat[], metres: number): [number, number, number, number] {
-  const lats = coords.map((p) => p[1]), lngs = coords.map((p) => p[0]);
-  const dLat = metres / 111320, dLng = metres / (111320 * Math.cos((lats[0] * Math.PI) / 180));
-  return [Math.min(...lngs) - dLng, Math.min(...lats) - dLat, Math.max(...lngs) + dLng, Math.max(...lats) + dLat];
-}
-
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 function setProgress(text: string, fraction?: number): void {
@@ -419,6 +411,64 @@ const STAGES: Record<string, [number, number]> = {
   Done: [1, 1],
 };
 
+/* ---------------- building, off the page's thread ---------------- */
+
+const UNSUPPORTED = new Error("Build worker unavailable");
+
+/** Build in a worker so the page stays responsive; on the page where a worker can't. */
+async function build(job: BuildJob, report: BuildReport): Promise<BuildOutcome> {
+  if (typeof Worker !== "undefined") {
+    try {
+      return await buildInWorker(job, report);
+    } catch (e) {
+      if (e !== UNSUPPORTED) throw e;
+    }
+  }
+  return runBuild(job, report, (text) => setProgress(text));
+}
+
+function buildInWorker(job: BuildJob, report: BuildReport): Promise<BuildOutcome> {
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL("./buildWorker.ts", import.meta.url), { type: "module" });
+    } catch {
+      reject(UNSUPPORTED);
+      return;
+    }
+    let heard = false;
+    // Failing to load at all means no worker here: build on the page instead.
+    worker.onerror = (e) => {
+      worker.terminate();
+      reject(heard ? new Error(e.message || "The build stopped unexpectedly") : UNSUPPORTED);
+    };
+    worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
+      heard = true;
+      const m = e.data;
+      if (m.type === "progress") void report(m.stage, m.fraction);
+      else if (m.type === "trace") setProgress(m.text);
+      else {
+        worker.terminate();
+        if (m.type === "unsupported") reject(UNSUPPORTED);
+        else if (m.type === "error") reject(new Error(m.message));
+        else {
+          // Classes don't survive the trip: rebuild the projection; the photos come back as bitmaps.
+          const result = { ...m.outcome.result, proj: new LocalProjection(m.outcome.result.proj.origin) };
+          const chunkImages = new Map<string, OffscreenCanvas>();
+          for (const [k, bmp] of m.images) {
+            const c = new OffscreenCanvas(bmp.width, bmp.height);
+            c.getContext("2d")!.drawImage(bmp, 0, 0);
+            bmp.close();
+            chunkImages.set(k, c);
+          }
+          resolve({ ...m.outcome, result, chunkImages });
+        }
+      }
+    };
+    worker.postMessage(job);
+  });
+}
+
 $("build").onclick = async () => {
   if (!current || building) return;
   building = true;
@@ -431,51 +481,23 @@ $("build").onclick = async () => {
   preview = null;
 
   const opts = readOptions();
-  const chunkImages = new Map<string, OffscreenCanvas>();
-  const usedImagery = new Set<ImagerySource>();
-  const usedDem = new Set<DemSource>();
-  const chain = imageryChain(current.coords[Math.floor(current.coords.length / 2)], $<HTMLSelectElement>("imagerySource").value as ImagerySource | "auto");
   const report = async (stage: string, f = 0) => {
     const [a, b] = STAGES[stage] ?? [0, 1];
     setProgress(stage === "Fetching aerial imagery" ? `${stage} (${Math.round(f * 100)}%)` : stage, a + (b - a) * f);
     await nextFrame();
   };
   try {
-    await report("Fetching OpenStreetMap data");
     const token = $<HTMLInputElement>("mapillaryToken").value.trim();
     saveToken(token);
-    let seenError = "";
-    const [osm, tiles, seen] = await Promise.all([
-      fetchOsm(current.coords),
-      fetchTileFeatures(paddedBounds(current.coords, (opts.buildingRadius ?? 250) + 50)).catch(() => null),
-      token
-        ? fetchSeen(paddedBounds(current.coords, (opts.corridor ?? 90) + 20), token).catch((e) => {
-          seenError = (e as Error).message;
-          return [];
-        })
-        : Promise.resolve([]),
-    ]);
-    if (tiles) osm.features.buildings = tiles.buildings;
-    // Overpass widths when it answered; otherwise widths by road class from the tiles.
-    const tileWidths = tiles ? classWidths(tiles.roads) : [];
-    const widthAt = opts.widthOverride
-      ? undefined
-      : osm.widthAt ?? (tileWidths.length ? widthLookup(tileWidths, current.coords[0][1]) : undefined);
-    const result = await buildTrack(current.coords, opts, {
-      dem: (proj, bounds, z) => loadDem(proj, bounds, z, undefined, usedDem),
-      imagery: opts.imageryZoom ? (proj, chunk, z, size) => loadChunkImagery(proj, chunk, z, size, chunkImages, chain, usedImagery) : undefined,
-      widthAt,
-      osm: osm.features,
+    const job: BuildJob = {
+      coords: current.coords,
       roundabouts: current.roundabouts,
-      streets: tiles ? { lines: tiles.roads, names: tiles.names } : undefined,
-      pois: tiles?.pois,
-      seen,
-      renderArt,
-      raster: (proj, path, reach) => loadRouteRaster(proj, path, reach, chain, 20, (d, t) => setProgress(`Tracing the road in the aerial photos (${Math.round((d / t) * 100)}%)`)),
-      roadClassAt: tiles ? roadClassLookup(tiles.roads, current.coords[0][1]) : undefined,
-      imageryCredit: () => [...[...usedImagery].map((k) => IMAGERY[k].credit), ...[...usedDem].map((k) => DEM_CREDIT[k])].join("; "),
-    }, placeMeta, report);
-
+      opts,
+      token,
+      imagerySource: $<HTMLSelectElement>("imagerySource").value as ImagerySource | "auto",
+      placeMeta,
+    };
+    const { result, chunkImages, usedImagery, usedDem, widthFallback, seen, seenError } = await build(job, report);
     await report("Rendering preview");
     preview = await createPreview($<HTMLCanvasElement>("preview-canvas"), result.model, result.plan, chunkImages, result.previewTextures);
     try {
@@ -493,9 +515,9 @@ $("build").onclick = async () => {
     a.download = `${result.slug}.zip`;
     a.textContent = `Download ${result.slug}.zip (${(zip.length / 1e6).toFixed(1)} MB)`;
     lastResult = result;
-    showStats(result, !widthAt && !opts.widthOverride, usedImagery, usedDem);
+    showStats(result, widthFallback, usedImagery, usedDem);
     if (token) {
-      $("result-stats").insertAdjacentHTML("beforeend", `<div><dt>Mapillary</dt><dd>${seenError ? escapeHtml(seenError) : `${seen.length} objects`}</dd></div>`);
+      $("result-stats").insertAdjacentHTML("beforeend", `<div><dt>Mapillary</dt><dd>${seenError ? escapeHtml(seenError) : `${seen} objects`}</dd></div>`);
     }
     await report("Done", 1);
     $("result").hidden = false;
@@ -510,12 +532,12 @@ $("build").onclick = async () => {
   }
 };
 
-function showStats(r: TrackResult, widthFallback: boolean, usedImagery: Set<ImagerySource>, usedDem: Set<DemSource>): void {
+function showStats(r: TrackResult, widthFallback: boolean, usedImagery: ImagerySource[], usedDem: DemSource[]): void {
   const s = r.stats;
   const rows: [string, string][] = [
     ["Length", s.closed ? `${(s.length / 1000).toFixed(2)} km` : `${(s.timedLength / 1000).toFixed(2)} km timed, ${(s.length / 1000).toFixed(2)} km with run-up and run-off`],
     ["Layout", s.closed ? "Circuit" : "A to B"],
-    ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m${usedDem.size ? ` (${[...usedDem].map((k) => DEM_LABEL[k]).join(" + ")} bare-earth model)` : ""}`],
+    ["Elevation", `${Math.round(s.minElevation)}–${Math.round(s.maxElevation)} m${usedDem.length ? ` (${[...usedDem].map((k) => DEM_LABEL[k]).join(" + ")} bare-earth model)` : ""}`],
     ["Climb", `${Math.round(s.climb)} m`],
     ["Avg width", `${s.meanWidth.toFixed(1)} m${widthFallback ? " (default)" : ""}`],
     ["Trees", s.trees.toLocaleString()],

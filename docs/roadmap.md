@@ -35,7 +35,7 @@ Rough priority order. Each chunk is a self-contained change.
 
 ## Later
 
-10. **Build in a Web Worker** so the page stays responsive on long roads.
+10. ~~**Build in a Web Worker** so the page stays responsive on long roads.~~ Done.
 11. **Higher-resolution elevation abroad.** USGS 3DEP 1 m, Japan GSI 5 m.
     (Done for Queensland, NSW and Victoria.)
 12. **CSP extras.** `ext_config.ini` with rain puddles and track lighting.

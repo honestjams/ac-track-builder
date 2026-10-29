@@ -176,6 +176,8 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/cull.ts` | Splits wide meshes into tiles and sets draw distances, so the game can skip what's out of sight |
 | `src/core/track.ts` | The whole pipeline; network access is injected |
 | `src/services/` | OSRM, Photon/Nominatim, Overpass, OpenFreeMap vector tiles, tile fetching (browser only) |
+| `src/services/pipeline.ts` | One build: fetch the map data, then `buildTrack` with the real data sources |
+| `src/ui/buildWorker.ts` | Runs the build in a Web Worker so the page stays responsive (the page builds itself where a worker can't draw) |
 | `src/ui/` | Map UI and three.js preview |
 
 `src/core` has no DOM or network code, so the whole pipeline runs under
