@@ -106,17 +106,23 @@ function distanceToPinned(pinned: boolean[], closed: boolean): number[] {
 
 /**
  * Which stretches of the road run round each circle. Sets the carriageway
- * width on the ring (at least 7 m, the usual single-lane circulating width),
+ * width on the ring (at least 7 m, the usual single-lane circulating width;
+ * 4.6 m a lane when the ring is tagged with two or more),
  * takes the banking off (the ring falls outward instead), and records where
  * the road crosses the ring's outer edge.
  */
+/** Width of one circulating lane on a multi-lane roundabout, metres. */
+const MULTI_LANE_W = 4.6;
+
 function ringsAlong(samples: RoadSample[], circles: Circle[], closed: boolean, length: number): Roundabout[] {
   const out: Roundabout[] = [];
-  for (const { c, r } of circles) {
+  for (const { c, r, lanes: tagged } of circles) {
     const on = samples.map((s) => Math.abs(Math.hypot(s.pos[0] - c[0], s.pos[1] - c[1]) - r) < 1);
     if (!on.some(Boolean)) continue;
     const idx = on.map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
-    const w = Math.max(7, ...idx.map((i) => samples[i].width));
+    // Circulating lanes are wider than lanes on the straight (long vehicles sweep wide): about 4.6 m each.
+    const w = Math.max(7, (tagged ?? 0) >= 2 ? tagged! * MULTI_LANE_W : 0, ...idx.map((i) => samples[i].width));
+    const lanes = tagged ?? (w >= 9.5 ? 2 : 1);
     const outer = r + w / 2;
     for (const i of idx) {
       samples[i].width = w;
@@ -133,7 +139,7 @@ function ringsAlong(samples: RoadSample[], circles: Circle[], closed: boolean, l
       }
     }
     const sIn = samples[idx[0]].s, sOut = samples[idx[idx.length - 1]].s;
-    out.push({ c, r, w, hc: 0, sIn, sOut: Math.min(length, sOut), crossings });
+    out.push({ c, r, w, lanes, hc: 0, sIn, sOut: Math.min(length, sOut), crossings });
   }
   return out;
 }

@@ -3,7 +3,7 @@ import { buildTrack, type DataSources } from "../src/core/track";
 import { DemGrid } from "../src/core/elevation";
 import { LocalProjection, type LngLat, type Vec2 } from "../src/core/geo";
 import { readKn5, type Kn5MeshNode, type Kn5Node } from "../src/core/kn5";
-import { buildRingMeshes, fitCircle, resolveRoundabouts, ringHeight } from "../src/core/roundabout";
+import { buildRingMarkings, buildRingMeshes, fitCircle, resolveRoundabouts, ringHeight } from "../src/core/roundabout";
 import { withDefaults } from "../src/core/options";
 
 const proj = new LocalProjection([153.4, -28.0]);
@@ -34,7 +34,8 @@ describe("circle fitting", () => {
     const ring: LngLat[] = [];
     for (let a = 0; a < 360; a += 30) ring.push(ll([300 + Math.cos((a * Math.PI) / 180) * 18, Math.sin((a * Math.PI) / 180) * 18]));
     const { hint } = throughRoundabout();
-    expect(resolveRoundabouts([hint], [ring], proj)[0].r).toBeCloseTo(18, 1);
+    expect(resolveRoundabouts([hint], [{ pts: ring }], proj)[0].r).toBeCloseTo(18, 1);
+    expect(resolveRoundabouts([hint], [{ pts: ring, lanes: 2 }], proj)[0].lanes).toBe(2);
     expect(resolveRoundabouts([hint], [], proj)[0].r).toBeCloseTo(15, 1);
     // two points heading east: clockwise traffic has the centre to the south
     const guess = resolveRoundabouts([{ location: ll([0, 0]), arc: [ll([0, 0]), ll([3, 0])] }], [], proj)[0];
@@ -120,5 +121,46 @@ describe("buildTrack through a roundabout", async () => {
         expect(Math.hypot(cx - rb.c[0], -cz - rb.c[1])).toBeGreaterThan(rb.r + rb.w / 2 - 1);
       }
     }
+  });
+  it("paints a give-way line across the entering half of each road joining, and no lane line on one lane", () => {
+    expect(rb.lanes).toBe(1);
+    const paint = all.find((m) => m.name === "MARKINGS_RB0");
+    expect(paint).toBeDefined();
+    // One opening on the east side, centred on angle 0: traffic comes in heading west and keeps left, the south half.
+    const m = buildRingMarkings({ ...rb, openings: [[-0.6, 0.6]] }, 0)!;
+    const Ro = rb.r + rb.w / 2;
+    for (let i = 0; i < m.positions.length; i += 3) {
+      const x = m.positions[i] - rb.c[0], y = -m.positions[i + 2] - rb.c[1];
+      expect(y).toBeLessThan(0.01);
+      expect(Math.hypot(x, y)).toBeGreaterThan(Ro - 0.45);
+      expect(m.positions[i + 1] - ringHeight(rb, Math.hypot(x, y))).toBeCloseTo(0.015, 3);
+      expect(m.normals[i + 1]).toBeGreaterThan(0.99); // faces up
+    }
+    // Dashes: 0.6 m on, 0.6 m off, from 2.5 m in (the opening's pad) to the middle of the road.
+    const dashes = m.indices.length / 6;
+    expect(dashes).toBeGreaterThan(Math.floor(((0.6 * Ro) - 2.5) / 1.2) - 1);
+  });
+
+  it("puts a broken lane line round a two-lane ring", () => {
+    const wide = { ...rb, w: 9.2, lanes: 2, openings: [] as [number, number][], crossings: [] };
+    const m = buildRingMarkings(wide, 0)!;
+    const mid = rb.r; // between the lanes of a ring centred on its circulating radius
+    let near = 0;
+    for (let i = 0; i < m.positions.length; i += 3) {
+      const d = Math.hypot(m.positions[i] - rb.c[0], -m.positions[i + 2] - rb.c[1]);
+      expect(Math.abs(d - mid)).toBeLessThan(0.06);
+      near++;
+    }
+    expect(near).toBeGreaterThan(0);
+    // About a third of the way round is paint (3 m on, 6 m off).
+    let painted = 0;
+    for (let t = 0; t < m.indices.length; t += 3) {
+      const [a, b, c] = [0, 1, 2].map((k) => m.indices[t + k] * 3);
+      const ux = m.positions[b] - m.positions[a], uz = m.positions[b + 2] - m.positions[a + 2];
+      const vx = m.positions[c] - m.positions[a], vz = m.positions[c + 2] - m.positions[a + 2];
+      painted += Math.abs(ux * vz - uz * vx) / 2;
+    }
+    expect(painted / (2 * Math.PI * mid * 0.1)).toBeGreaterThan(0.28);
+    expect(painted / (2 * Math.PI * mid * 0.1)).toBeLessThan(0.36);
   });
 });

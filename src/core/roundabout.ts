@@ -24,11 +24,15 @@ export interface RoundaboutHint {
 export interface Circle {
   c: Vec2;
   r: number;
+  /** Circulating lanes, when the OSM ring way is tagged with them. */
+  lanes?: number;
 }
 
 export interface Roundabout extends Circle {
   /** Circulating carriageway width, metres. */
   w: number;
+  /** Circulating lanes (2+ get a lane line round the ring). */
+  lanes: number;
   /** Ring surface height at the centreline radius, metres. */
   hc: number;
   /** Distance range along the route spent on the ring. */
@@ -48,18 +52,23 @@ export interface Roundabout extends Circle {
 
 /** Metres round a ring of radius r from angle a to the nearest opening (0 inside one). */
 export function toOpening(rb: Roundabout, r: number, a: number): number {
-  const wrap = (x: number) => ((x % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-  const open = rb.openings?.length
-    ? rb.openings
-    // No connector edges known: the ring's own width either side of each crossing.
-    : rb.crossings.map((x): [number, number] => [x - (rb.w / 2 + 2) / r, x + (rb.w / 2 + 2) / r]);
   let best = Infinity;
-  for (const [a0, a1] of open) {
+  for (const [a0, a1] of openingsOf(rb, r)) {
     const span = wrap(a1 - a0), off = wrap(a - a0);
     if (off <= span) return 0;
     best = Math.min(best, (off - span) * r, (2 * Math.PI - off) * r);
   }
   return best;
+}
+
+const wrap = (x: number) => ((x % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+/** Where roads join the ring, as angle ranges at radius r. */
+function openingsOf(rb: Roundabout, r: number): [number, number][] {
+  return rb.openings?.length
+    ? rb.openings
+    // No connector edges known: the ring's own width either side of each crossing.
+    : rb.crossings.map((x): [number, number] => [x - (rb.w / 2 + 2) / r, x + (rb.w / 2 + 2) / r]);
 }
 
 export const RING_FALL = 0.02;
@@ -116,8 +125,8 @@ function sweep(pts: Vec2[], c: Vec2): number {
  * whose centre lies to the right of the entry (traffic keeps left and
  * circulates clockwise).
  */
-export function resolveRoundabouts(hints: RoundaboutHint[], rings: LngLat[][], proj: LocalProjection): Circle[] {
-  const localRings = rings.map((r) => r.map((p) => proj.toLocal(p)));
+export function resolveRoundabouts(hints: RoundaboutHint[], rings: { pts: LngLat[]; lanes?: number }[], proj: LocalProjection): Circle[] {
+  const localRings = rings.map((r) => Object.assign(r.pts.map((p) => proj.toLocal(p)), { lanes: r.lanes }));
   const out: Circle[] = [];
   for (const h of hints) {
     const loc = proj.toLocal(h.location);
@@ -127,7 +136,10 @@ export function resolveRoundabouts(hints: RoundaboutHint[], rings: LngLat[][], p
     const near = localRings.filter((ring) => ring.some((p) => Math.hypot(p[0] - loc[0], p[1] - loc[1]) < 40));
     const nodes = near.flat().filter((p) => Math.hypot(p[0] - loc[0], p[1] - loc[1]) < 2 * MAX_R);
     const fromRing = nodes.length >= 5 ? fitCircle(nodes) : null;
-    if (fromRing && fromRing.r >= MIN_R && fromRing.r <= MAX_R && fromRing.rms < 2) circle = fromRing;
+    if (fromRing && fromRing.r >= MIN_R && fromRing.r <= MAX_R && fromRing.rms < 2) {
+      const lanes = Math.max(0, ...near.map((ring) => ring.lanes ?? 0));
+      circle = { c: fromRing.c, r: fromRing.r, ...(lanes ? { lanes } : {}) };
+    }
 
     if (!circle && arc.length >= 4) {
       const f = fitCircle(arc);
@@ -283,6 +295,65 @@ export function buildRingMeshes(rb: Roundabout, k: number, opts: BuildOptions, r
     verge: verge.toKn5(`1GRASS_RBVERGE${k}`, rb.kerbed ? "grass" : "verge"),
     kerb,
   };
+}
+
+// Australian markings (drive on the left, clockwise round the ring): a broken
+// give-way line, 0.6 m dashes and gaps, 0.3 m wide, across the entering half
+// of each road that joins; and on a multi-lane ring a broken lane line
+// between the circulating lanes.
+const GIVE_WAY = { dash: 0.6, gap: 0.6, width: 0.3 };
+const RING_LANE = { dash: 3, gap: 6, width: 0.1 };
+const PAINT_LIFT = 0.015;
+
+/**
+ * The ring's line markings, or null if it has none to paint. Give-way lines
+ * sit on the ring's outer edge across the half of each opening that traffic
+ * enters by: the clockwise-most half, since you keep left on the way in and
+ * turn left onto the ring.
+ */
+export function buildRingMarkings(rb: Roundabout, k: number): Kn5MeshNode | null {
+  const Ro = outerRadius(rb), Ri = innerRadius(rb);
+  const mb = new MeshBuilder();
+  /** A painted band from radius r0 out to r1, counter-clockwise from angle a0 to a1. */
+  const band = (r0: number, r1: number, a0: number, a1: number) => {
+    const steps = Math.max(1, Math.ceil(((a1 - a0) * r1) / 1));
+    const base = mb.vertexCount;
+    for (let i = 0; i <= steps; i++) {
+      const a = a0 + ((a1 - a0) * i) / steps;
+      for (const rho of [r0, r1]) mb.vertex([rb.c[0] + Math.cos(a) * rho, rb.c[1] + Math.sin(a) * rho, ringHeight(rb, rho) + PAINT_LIFT], 0, 0);
+    }
+    for (let i = 0; i < steps; i++) {
+      const p = base + i * 2, q = p + 2;
+      mb.quad(p, p + 1, q + 1, q);
+    }
+  };
+  /** Dashes along an arc at radius rho, from angle a0 for `length` metres. */
+  const dashes = (rho: number, width: number, a0: number, length: number, dash: number, gap: number) => {
+    for (let d = 0; d + dash <= length + 1e-6; d += dash + gap) band(rho - width / 2, rho + width / 2, a0 + d / rho, a0 + (d + dash) / rho);
+  };
+
+  // Lane lines round the whole ring, between the lanes.
+  for (let j = 1; j < rb.lanes; j++) {
+    const rho = Ri + ((Ro - Ri) * j) / rb.lanes;
+    const circumference = 2 * Math.PI * rho, period = RING_LANE.dash + RING_LANE.gap;
+    dashes(rho, RING_LANE.width, 0, Math.floor(circumference / period) * period - RING_LANE.gap, RING_LANE.dash, RING_LANE.gap);
+  }
+
+  // Give-way lines: openings merged where they overlap (the route and a side street on one arm).
+  const spans = openingsOf(rb, Ro).map(([a0, a1]) => ({ a0: wrap(a0), span: wrap(a1 - a0) })).sort((x, y) => x.a0 - y.a0);
+  const merged: { a0: number; span: number }[] = [];
+  for (const o of spans) {
+    const last = merged[merged.length - 1];
+    if (last && o.a0 <= last.a0 + last.span) last.span = Math.max(last.span, o.a0 + o.span - last.a0);
+    else merged.push({ ...o });
+  }
+  const pad = 2.5 / Ro; // the openings reach 2.5 m past the road edges
+  for (const { a0, span } of merged) {
+    const length = (span / 2 - pad) * Ro - 0.3;
+    if (length < 2) continue;
+    dashes(Ro - GIVE_WAY.width / 2 - 0.05, GIVE_WAY.width, a0 + pad, length, GIVE_WAY.dash, GIVE_WAY.gap);
+  }
+  return mb.indices.length ? mb.toKn5(`MARKINGS_RB${k}`, "paint", { castShadows: false }) : null;
 }
 
 /** Invisible wall round the roundabout, open where the route enters and leaves. */

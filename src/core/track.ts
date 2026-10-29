@@ -15,7 +15,7 @@ import { simplify } from "./polyline";
 import { applyElevation, inRoundabout, isLoop, planRoad, surfaceHeight, SegmentIndex, type RoadPlan, type RoadSample } from "./road";
 import { extendRoute, pathLength } from "./extend";
 import { keepOffRoute, onRoute } from "./clearance";
-import { buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
+import { buildRingMarkings, buildRingMeshes, buildRingWall, innerRadius, outerRadius, resolveRoundabouts, ringHeight, type RoundaboutHint } from "./roundabout";
 import { buildRoadMeshes, buildWalls, type RoadMaterialFn } from "./roadMesh";
 import { buildKerbReturns, buildKerbs, KERB_BACK, KERB_H, kerbEvidence, planKerbs, STRIP_EXTRA, stripPhotoTexture, type StripMaterialFn } from "./kerbs";
 import { photoRoadTexture } from "./photoSurface";
@@ -82,8 +82,8 @@ export interface OsmFeatures {
   /** Footprints (first point not repeated) with OSM / vector tile tags. */
   buildings: { ring: LngLat[]; tags: Record<string, string> }[];
   guardRails: LngLat[][];
-  /** OSM junction=roundabout ways near the route. */
-  roundaboutRings?: LngLat[][];
+  /** OSM junction=roundabout ways near the route, with their circulating lanes when tagged. */
+  roundaboutRings?: { pts: LngLat[]; lanes?: number }[];
   /** Fences, walls and hedges near the route (OSM barrier=*). */
   barriers?: { pts: LngLat[]; kind: "fence" | "wall" | "hedge" | "retaining_wall"; fenceType?: string; material?: string; height?: number }[];
   /** Power poles, street lamps and distribution power lines (on poles) near the route. */
@@ -833,6 +833,8 @@ export async function buildTrack(
     const nearest = plan.samples.reduce((a, s) => (Math.abs(s.s - rb.sIn) < Math.abs(a.s - rb.sIn) ? s : a));
     const m = buildRingMeshes(rb, k, opts, roadMaterial(Math.floor(plan.samples.indexOf(nearest) / 120), rb.w, nearest));
     ringNodes.push(m.road, m.island, m.verge, ...m.kerb);
+    const paint = opts.markings ? buildRingMarkings(rb, k) : null;
+    if (paint) markings.push(paint);
   });
   const terrainNodes: Kn5Node[] = [];
   for (const [i, chunk] of chunks.entries()) {

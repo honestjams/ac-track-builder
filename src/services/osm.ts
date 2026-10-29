@@ -197,7 +197,8 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     if (tags.power === "line" || tags.power === "minor_line") {
       if (onPoles(tags)) features.powerLines!.push(pts);
     } else if (tags.junction === "roundabout" || tags.junction === "circular") {
-      features.roundaboutRings!.push(pts);
+      const lanes = parseInt(tags.lanes ?? "", 10);
+      features.roundaboutRings!.push({ pts, ...(lanes > 0 && lanes < 5 ? { lanes } : {}) });
     } else if (/^(fence|wall|hedge|retaining_wall)$/.test(tags.barrier ?? "")) {
       const height = parseFloat(tags.height ?? "");
       features.barriers!.push({

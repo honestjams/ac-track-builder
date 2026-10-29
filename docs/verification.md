@@ -47,6 +47,7 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 31 | Up close the road shows stones in the surface and lawns show grass blades; nothing turns black, white or shiny (if it does, untick Detail shaders and say what you saw) | `multiMapMaterial` (road) and `multilayerMaterial` (ground) in `track.ts`, `detailTexture` / `layerMask` in `textures.ts` |
 | 32 | With CSP Rain FX in the wet: puddles and a soaked sheen on the road, grass darkens but doesn't shine, paint lines feel slippery | `[RAIN_FX]` in `extension/ext_config.ini` |
 | 33 | With CSP at night: house windows show lit rooms (some dark), not glowing walls; a town's glow on the skyline | `[Material_RoomWindows]`, `[LIGHT_POLLUTION]`, `WINDOWS_*` panes |
+| 34 | At a roundabout: a broken give-way line across the left half of each road coming in (the lane you enter by), none on the way out; a two-lane roundabout is wider with a broken lane line round between its lanes | `buildRingMarkings` in `roundabout.ts`, ring width in `road.ts` (`ringsAlong`) |
 | 24 | A replay switches between trackside cameras that follow the car (not stuck on the chase cam), none inside a building or the ground | `data/cameras_1.ini`, `cameras.ts` |
 
 ## Known unknowns

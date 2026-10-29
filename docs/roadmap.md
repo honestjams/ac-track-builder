@@ -30,8 +30,9 @@ Rough priority order. Each chunk is a self-contained change.
    small mask, so the photo stays DXT1) and ~~normal maps for the road and
    walls~~. Next from that research: a CSP tree list for instanced 3D trees,
    dirt and gravel layers in the ground mask.
-9. **Scenery.** Multi-lane roundabouts, front fences where OSM has none
-   (read off the photo), house windows lit at night.
+9. **Scenery.** ~~Multi-lane roundabouts~~ (wider ring, lane line, give-way
+   lines at every entry), ~~house windows lit at night~~. Still open: front
+   fences where OSM has none (read off the photo).
 
 ## Later
 

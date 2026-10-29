@@ -43,6 +43,9 @@ everything runs client-side: no server, no account, no queue.
   line on blind bends and crests, plus raised pavement markers.
 - Real roundabouts: the full circulating carriageway, a mountable kerb and a
   planted island, instead of a hairpin where the route goes round one.
+  Give-way lines across each entry, and on two-lane roundabouts (from the
+  OSM `lanes` tag, or a ring wider than 9.5 m) a wider ring with a lane line
+  round it.
 - Side streets: the other roads around the route are drawn too, joined to
   it at proper junction mouths (motorways, bridges and tunnels are left out).
 - Street name signs (white on blue blades) at every named junction, plus
