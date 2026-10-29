@@ -2,6 +2,7 @@
 // (Overpass). All keyless public services; the browser's Referer identifies
 // the app, as their usage policies ask.
 
+import { warnMissing } from "./dataWarnings";
 import { haversine, type LngLat } from "../core/geo";
 import { trimSpurs } from "../core/spurs";
 import type { OsmFeatures } from "../core/track";
@@ -166,22 +167,29 @@ export async function fetchOsm(routeCoords: LngLat[]): Promise<OsmData> {
     way(around:40,${around})[power~"^(line|minor_line)$"];
     way(around:45,${around})[barrier~"^(fence|wall|hedge|retaining_wall)$"];
   );out tags geom;`;
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 45000);
   let elements: OverpassWay[] | undefined;
-  try {
-    elements = await Promise.any(OVERPASS.map(async (url) => {
-      const r = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }), signal: ctl.signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const body = await r.json();
-      return ((body.elements ?? []) as OverpassWay[]).filter((e) => (e.type === "way" && e.geometry) || (e.type === "node" && e.lat !== undefined));
-    }));
-  } catch {
-    // every mirror failed
-  } finally {
-    clearTimeout(timer);
-    ctl.abort();
+  // Every mirror at once; if they all fail (busy, timed out), wait and try again: without this data
+  // the build loses roundabout rings and road widths, and quietly comes out different.
+  for (let round = 0; round < 3 && !elements; round++) {
+    if (round) await new Promise((ok) => setTimeout(ok, 5000 * round));
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 45000);
+    try {
+      elements = await Promise.any(OVERPASS.map(async (url) => {
+        const r = await fetch(url, { method: "POST", body: new URLSearchParams({ data: query }), signal: ctl.signal });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const body = await r.json();
+        if (body.remark && /timed out|runtime error/i.test(body.remark)) throw new Error(body.remark);
+        return ((body.elements ?? []) as OverpassWay[]).filter((e) => (e.type === "way" && e.geometry) || (e.type === "node" && e.lat !== undefined));
+      }));
+    } catch {
+      // every mirror failed this round
+    } finally {
+      clearTimeout(timer);
+      ctl.abort();
+    }
   }
+  if (!elements) warnMissing("OpenStreetMap (Overpass): roundabouts, road widths, poles, lights, fences");
   const features: OsmFeatures = { buildings: [], guardRails: [], roundaboutRings: [], poles: [], lamps: [], powerLines: [], barriers: [] };
   if (!elements) return { features };
 

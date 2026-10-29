@@ -499,7 +499,7 @@ $("build").onclick = async () => {
       imagerySource: $<HTMLSelectElement>("imagerySource").value as ImagerySource | "auto",
       placeMeta,
     };
-    const { result, chunkImages, usedImagery, usedDem, widthFallback, seen, seenError } = await build(job, report);
+    const { result, chunkImages, usedImagery, usedDem, widthFallback, seen, seenError, missing } = await build(job, report);
     await report("Rendering preview");
     preview = await createPreview($<HTMLCanvasElement>("preview-canvas"), result.model, result.plan, chunkImages, result.previewTextures);
     try {
@@ -520,6 +520,10 @@ $("build").onclick = async () => {
     showStats(result, widthFallback, usedImagery, usedDem);
     if (token) {
       $("result-stats").insertAdjacentHTML("beforeend", `<div><dt>Mapillary</dt><dd>${seenError ? escapeHtml(seenError) : `${seen} objects`}</dd></div>`);
+    }
+    if (missing.length) {
+      // The track built, but without some data: say so, it will differ from a full build.
+      $("result-stats").insertAdjacentHTML("beforeend", `<div><dt>Missing data</dt><dd>${missing.map(escapeHtml).join("; ")}. Build again for a complete track.</dd></div>`);
     }
     await report("Done", 1);
     $("result").hidden = false;
