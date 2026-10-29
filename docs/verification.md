@@ -48,6 +48,7 @@ track loads and drives. Use a short road (1–3 km) for the first test.
 | 32 | With CSP Rain FX in the wet: puddles and a soaked sheen on the road, grass darkens but doesn't shine, paint lines feel slippery | `[RAIN_FX]` in `extension/ext_config.ini` |
 | 33 | With CSP at night: house windows show lit rooms (some dark), not glowing walls; a town's glow on the skyline | `[Material_RoomWindows]`, `[LIGHT_POLLUTION]`, `WINDOWS_*` panes |
 | 34 | At a roundabout: a broken give-way line across the left half of each road coming in (the lane you enter by), none on the way out; a two-lane roundabout is wider with a broken lane line round between its lanes | `buildRingMarkings` in `roundabout.ts`, ring width in `road.ts` (`ringsAlong`) |
+| 35 | Buildings look like a real town: houses in mixed brick, weatherboard, fibro and render with different roofs; in Queensland some raised on stumps with lattice and a verandah; shops with glass fronts, signs and awnings over the footpath; flats and towers with rows of windows; warehouses with roller doors. Walls don't flicker, awnings and verandahs aren't see-through from below, windows aren't cut off by roofs | `buildingStyles.ts` (types, textures), `buildBuildings` in `buildings.ts` |
 | 24 | A replay switches between trackside cameras that follow the car (not stuck on the chase cam), none inside a building or the ground | `data/cameras_1.ini`, `cameras.ts` |
 
 ## Known unknowns

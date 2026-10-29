@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildingHeight, detectBuildings, ringArea } from "../src/core/buildings";
-import { ROOF_COLOURS } from "../src/core/textures";
+import { buildingHeight, detectBuildings, plainHouse, ringArea } from "../src/core/buildings";
+import { ROOF_COLOURS } from "../src/core/buildingStyles";
 
 /** 200 m chunk at 512 px: grass, a pale metal roof, a terracotta roof and a grey road strip. */
 function scene(): Uint8Array {
@@ -55,7 +55,7 @@ describe("house roofs", async () => {
   // A 12 x 8 m house at ground level 10, front wall along y = 0 (facing south).
   const ring: [number, number][] = [[0, 0], [12, 0], [12, 8], [0, 8]];
   const house = (roof: "hip" | "gable", garage = false) =>
-    buildBuildings([{ ring, height: 2.8, roof, roofColour: 0, facade: 0, source: "frontage", front: [[0, 0], [12, 0]], garage, setback: 8 }], () => 10);
+    buildBuildings([{ ring, ...plainHouse(roof, 0, 2.8), source: "frontage", front: [[0, 0], [12, 0]], garage, setback: 8 }], () => 10);
   const verts = (nodes: ReturnType<typeof house>, re: RegExp) => nodes.filter((n) => re.test(n.name)).flatMap((n) =>
     Array.from({ length: n.positions.length / 3 }, (_, i) => [n.positions[i * 3], -n.positions[i * 3 + 2], n.positions[i * 3 + 1]]));
 

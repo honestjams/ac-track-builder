@@ -32,8 +32,10 @@ Rough priority order. Each chunk is a self-contained change.
    research: a CSP tree list for instanced 3D trees, normal maps on the
    ground details.
 9. **Scenery.** ~~Multi-lane roundabouts~~ (wider ring, lane line, give-way
-   lines at every entry), ~~house windows lit at night~~. Still open: front
-   fences where OSM has none (read off the photo).
+   lines at every entry), ~~house windows lit at night~~, ~~many building
+   types and finishes~~ (houses, Queenslanders, flats, apartments, towers,
+   shops, offices, warehouses, halls). Still open: front fences where OSM
+   has none (read off the photo), balconies as geometry on apartments.
 
 ## Later
 

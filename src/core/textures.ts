@@ -17,7 +17,7 @@ function rng(seed: number): () => number {
 }
 
 /** Tileable value noise in 0..1 with `cells` lattice cells across. */
-function valueNoise(w: number, h: number, cells: number, seed: number): Float32Array {
+export function valueNoise(w: number, h: number, cells: number, seed: number): Float32Array {
   const r = rng(seed);
   const cx = cells, cy = Math.max(1, Math.round((cells * h) / w));
   const lattice = Array.from({ length: cx * cy }, r);
@@ -36,7 +36,7 @@ function valueNoise(w: number, h: number, cells: number, seed: number): Float32A
   return out;
 }
 
-function fill(w: number, h: number, shade: (x: number, y: number, i: number) => [number, number, number]): Uint8Array {
+export function fill(w: number, h: number, shade: (x: number, y: number, i: number) => [number, number, number]): Uint8Array {
   const px = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -405,87 +405,6 @@ export function postTexture(): Uint8Array {
     if (y >= 8 && y < 16) return x < 8 ? [230, 40, 30] : [240, 170, 30];
     if (y < 22) return [25, 25, 25];
     return [232, 232, 226];
-  }), w, h, { alpha: false });
-}
-
-/** Australian roof colours (Colorbond-style metal, plus terracotta tile). */
-export const ROOF_COLOURS: { name: string; rgb: [number, number, number]; tile?: boolean }[] = [
-  { name: "surfmist", rgb: [228, 226, 213] },
-  { name: "shalegrey", rgb: [189, 191, 186] },
-  { name: "windspray", rgb: [136, 139, 138] },
-  { name: "woodland", rgb: [75, 76, 70] },
-  { name: "monument", rgb: [50, 50, 51] },
-  { name: "cream", rgb: [233, 220, 184] },
-  { name: "terracotta", rgb: [181, 88, 58], tile: true },
-];
-
-/** Roof sheet, 2 m x 2 m: corrugated metal or rows of tiles, in one colour. */
-export function roofTexture(colour: (typeof ROOF_COLOURS)[number]): Uint8Array {
-  const w = 128, h = 128;
-  const r = rng(71 + colour.rgb[0]);
-  const [cr, cg, cb] = colour.rgb;
-  return encodePng(fill(w, h, (x, y) => {
-    let k: number;
-    if (colour.tile) {
-      // Overlapping tile rows ~0.33 m, with staggered joints.
-      const row = Math.floor(y / 21), inRow = (y % 21) / 21;
-      const joint = (x + (row % 2) * 16) % 32 < 2;
-      k = 0.78 + inRow * 0.3 - (joint ? 0.25 : 0);
-    } else {
-      // Corrugations every ~76 mm run down the slope (along v).
-      k = 0.9 + 0.12 * Math.sin((x / w) * Math.PI * 2 * 26);
-    }
-    k += (r() - 0.5) * 0.06;
-    return [cr * k, cg * k, cb * k];
-  }), w, h, { alpha: false });
-}
-
-export const FACADES = ["brick", "weatherboard", "render", "creambrick", "fibro"] as const;
-
-/**
- * One storey (3 m) tall by 8 m wide: a wide living-room window and a small,
- * higher one (bathroom or bedroom), in white frames, so a wall reads as a
- * house rather than a row of motel rooms.
- */
-export function facadeTexture(kind: (typeof FACADES)[number]): Uint8Array {
-  const w = 256, h = 96; // 32 px per metre
-  const r = rng(61 + kind.length);
-  const windows: [number, number, number, number][] = [
-    [36, 108, 24, 66], // 2.25 m wide, sill at 0.9 m
-    [170, 210, 24, 50], // 1.25 m wide, sill at 1.4 m
-  ];
-  return encodePng(fill(w, h, (x, y) => {
-    for (const [x0, x1, y0, y1] of windows) {
-      if (x > x0 && x < x1 && y > y0 && y < y1) {
-        // Glass, a mullion in the wide one, and a hint of curtain at the top.
-        if (x1 - x0 > 60 && Math.abs(x - (x0 + x1) / 2) < 1.5) return [235, 235, 230];
-        const g = 55 + (y - y0) * 0.9 + r() * 8 + (y < y0 + 6 ? 40 : 0);
-        return [g * 0.7, g * 0.82, g];
-      }
-      if (x > x0 - 4 && x < x1 + 4 && y > y0 - 4 && y < y1 + 4) return [235, 235, 230];
-    }
-    const n = (r() - 0.5) * 14;
-    if (kind === "brick" || kind === "creambrick") {
-      // 230 x 76 mm bricks, stretcher bond.
-      const course = Math.floor(y / 2.5);
-      const mortar = y % 2.5 < 0.6 || (x + (course % 2) * 4) % 8 < 0.9;
-      const tone = ((course * 7 + Math.floor((x + (course % 2) * 4) / 8) * 13) % 5) * 6;
-      if (kind === "creambrick") return mortar ? [200 + n, 196 + n, 186 + n] : [214 + tone + n, 190 + tone / 2 + n, 148 + n];
-      if (mortar) return [196 + n, 188 + n, 172 + n];
-      return [150 + tone + n, 78 + tone / 2 + n, 58 + n];
-    }
-    if (kind === "weatherboard") {
-      // 150 mm boards with a shadow line under each.
-      const board = (y % 5) / 5;
-      const k = board > 0.8 ? 0.8 : 0.97 + board * 0.03;
-      return [238 * k + n, 236 * k + n, 226 * k + n];
-    }
-    if (kind === "fibro") {
-      // Fibro-cement sheets, 1.2 m wide, with cover strips.
-      const strip = x % 38 < 2;
-      return strip ? [205 + n, 205 + n, 198 + n] : [226 + n / 2, 224 + n / 2, 214 + n / 2];
-    }
-    return [214 + n, 200 + n, 172 + n];
   }), w, h, { alpha: false });
 }
 

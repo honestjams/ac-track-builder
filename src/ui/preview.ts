@@ -53,12 +53,20 @@ export async function createPreview(
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9fb7d0);
-  scene.fog = new THREE.Fog(0x9fb7d0, 600, 4000);
+  // Haze the colour of the horizon, so distant hills fade into the sky.
+  scene.background = new THREE.Color(0xc2d3e3);
+  scene.fog = new THREE.Fog(0xc2d3e3, 700, 4500);
   scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x4a4632, 1.6));
   const sun = new THREE.DirectionalLight(0xfff4e0, 1.8);
   sun.position.set(300, 600, 200);
   scene.add(sun);
+  const sky = skyDome(sun.position.clone().normalize());
+  scene.add(sky);
+  /** Renders a frame with the sky centred on the camera. */
+  const render = () => {
+    sky.position.copy(camera.position);
+    renderer.render(scene, camera);
+  };
 
   const textures = new Map(model.textures.map((t) => [t.name, t]));
   const materials = new Map<string, THREE.Material>();
@@ -153,7 +161,7 @@ export async function createPreview(
       if (!plan.closed && idx >= n - 13) driveS = 0;
     }
     controls.update();
-    renderer.render(scene, camera);
+    render();
     requestAnimationFrame(loop);
   };
   window.addEventListener("resize", resize);
@@ -165,7 +173,7 @@ export async function createPreview(
       camera.updateProjectionMatrix();
       startView();
       markers.forEach((m) => (m.visible = false));
-      renderer.render(scene, camera);
+      render();
       markers.forEach((m) => (m.visible = true));
       const blob: Blob = await new Promise((r) => canvas.toBlob((b) => r(b!), "image/png"));
       return new Uint8Array(await blob.arrayBuffer());
@@ -186,7 +194,7 @@ export async function createPreview(
       camera.position.set(...eye);
       controls.target.set(...target);
       controls.update();
-      renderer.render(scene, camera);
+      render();
     },
     toggleDrive() {
       driving = !driving;
@@ -205,4 +213,69 @@ export async function createPreview(
       renderer.dispose();
     },
   };
+}
+
+/**
+ * A sky to drive under: blue overhead fading to a pale hazy horizon, a glow
+ * round the sun, fair-weather cumulus lit from the sun's side with greyer
+ * bases, and high wisps of cirrus. Clouds sit on a plane, so they bunch up
+ * toward the horizon as real ones do. Drawn first, behind everything.
+ */
+function skyDome(sunDir: THREE.Vector3): THREE.Mesh {
+  const material = new THREE.ShaderMaterial({
+    uniforms: { sunDir: { value: sunDir } },
+    vertexShader: /* glsl */ `
+      varying vec3 vDir;
+      void main() {
+        vDir = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 sunDir;
+      varying vec3 vDir;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 6; i++) { v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; }
+        return v;
+      }
+      void main() {
+        vec3 d = normalize(vDir);
+        float h = max(d.y, 0.0);
+        vec3 zenith = vec3(0.23, 0.45, 0.78), horizon = vec3(0.76, 0.83, 0.89);
+        vec3 col = mix(horizon, zenith, pow(h, 0.5));
+        if (d.y < 0.0) col = mix(horizon, vec3(0.6, 0.64, 0.64), min(1.0, -d.y * 4.0));
+        float sd = max(dot(d, sunDir), 0.0);
+        col += vec3(1.0, 0.92, 0.75) * (pow(sd, 800.0) * 3.0 + pow(sd, 10.0) * 0.16);
+        if (d.y > 0.0) {
+          vec2 uv = d.xz / (d.y + 0.06) * 0.9;
+          float fade = smoothstep(0.0, 0.18, d.y);
+          // Cirrus: streaks high up.
+          float ci = fbm(vec2(uv.x * 0.35 + 20.0, uv.y * 2.5));
+          col = mix(col, vec3(0.97, 0.98, 1.0), smoothstep(0.58, 0.85, ci) * 0.3 * fade);
+          // Cumulus: puffs, brighter on the side toward the sun, grey underneath.
+          float n = fbm(uv + vec2(3.1, 7.4));
+          float cover = smoothstep(0.47, 0.66, n);
+          float toward = fbm(uv + vec2(3.1, 7.4) + sunDir.xz * 0.12);
+          float lit = clamp(0.82 + (n - toward) * 3.5, 0.55, 1.08);
+          vec3 cloud = vec3(1.0, 0.99, 0.97) * lit;
+          cloud = mix(cloud, vec3(0.6, 0.64, 0.7), smoothstep(0.7, 0.9, n) * 0.45);
+          cloud = mix(cloud, horizon, 1.0 - fade);
+          col = mix(col, cloud, cover * smoothstep(0.0, 0.06, d.y));
+        }
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+    side: THREE.BackSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+  });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(7000, 48, 24), material);
+  mesh.renderOrder = -1;
+  mesh.frustumCulled = false;
+  return mesh;
 }

@@ -70,6 +70,20 @@ everything runs client-side: no server, no account, no queue.
   roofs in the matching colour. In built-up areas every street frontage is
   read from the photo too, so each lot gets its house, square to the street
   at the setback and depth the photo shows.
+- A wide range of building types, each with its own walls, windows and
+  roof: brick veneer, weatherboard, fibro and rendered or clad modern
+  houses (some two-storey, some with skillion roofs); Queenslanders on
+  stumps behind lattice, with a verandah and deck (in Queensland);
+  townhouses, brick walk-up flats and apartments with balconies; glass
+  towers; offices; shops with a shopfront, sign, parapet and awning over
+  the footpath (shops under the flats and offices on main streets);
+  warehouses and sheds in Colorbond or tilt-up concrete with a roller door;
+  brick churches, halls and schools. About 60 wall finishes and 20 roofs
+  (Colorbond colours, terracotta and concrete tiles, membrane and gravel).
+  The type comes from what's known: OSM's building type and height, a
+  shop, cafe, church or school mapped inside it, the roof colour in the
+  photo, its size and whether it fronts the street. Only the finishes a
+  track uses go in its file.
 - Invisible walls that keep you on the road and pull in where switchbacks
   pass close to each other.
 - Time trial ready: on an A-to-B road the timed section is exactly the road
@@ -165,7 +179,8 @@ pins ──OSRM──▶ route polyline ──▶ local metres (scaled Web Merca
 | `src/core/roadMesh.ts` | Road, verge and wall meshes |
 | `src/core/terrain.ts`, `backdrop.ts` | Drivable terrain corridor and horizon scenery |
 | `src/core/scenery.ts` | Trees from imagery, guard rails, guide posts |
-| `src/core/buildings.ts` | OSM footprints and roofs detected in imagery, gable roofs |
+| `src/core/buildings.ts` | OSM footprints and roofs detected in imagery; walls, roofs (hip, gable, skillion, flat behind a parapet), verandahs, awnings, doors |
+| `src/core/buildingStyles.ts` | Building types, facades (walls and window layouts) and roof finishes, and the textures painted from them |
 | `src/core/frontage.ts` | Houses read off the photo along each street frontage |
 | `src/core/markings.ts` | Edge and dividing lines from sight distance, pavement markers |
 | `src/core/sideStreets.ts` | Other streets near the route and their junctions |

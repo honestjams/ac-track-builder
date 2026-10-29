@@ -14,11 +14,10 @@
 // (the next house), and long runs into ~15 m lots. Each house is a box
 // square to the street, its roof in the photo's colour.
 
-import { centroid, houseRoof, nearestRoofColour, pointInRing, type Building } from "./buildings";
+import { centroid, houseRoof, nearestRoofColour, plainHouse, pointInRing, type Building } from "./buildings";
 import type { Vec2 } from "./geo";
 import { rng } from "./scenery";
 import type { TerrainChunk } from "./terrain";
-import { FACADES } from "./textures";
 
 /** Aerial photo colour at a local point, 0..1 RGB, or null where there is none. */
 export type PhotoSampler = (x: number, y: number) => [number, number, number] | null;
@@ -242,10 +241,7 @@ function box(cols: Column[], side: 1 | -1, rand: () => number): Building | null 
   const area = (s1 - s0) * (back - front);
   return {
     ring,
-    height: area > 250 ? 3.6 : 2.8,
-    roof: houseRoof(rand),
-    roofColour: nearestRoofColour(rgb),
-    facade: Math.floor(rand() * FACADES.length),
+    ...plainHouse(houseRoof(rand), nearestRoofColour(rgb), area > 250 ? 3.6 : 2.8),
     source: "frontage",
     front: facing,
     setback: front,

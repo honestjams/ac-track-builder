@@ -23,11 +23,12 @@ import { encodeDdsDxt1, encodeDdsDxt5 } from "./dds";
 import { decodeOwnPng, encodePng } from "./png";
 import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { BARRIERS, barrierTexture, detailTexture, normalFromHeight, windowTexture, flatNormalTexture, GROUND_TILE, groundDetail, groundMask, type GroundKind, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { BARRIERS, barrierTexture, detailTexture, normalFromHeight, windowTexture, flatNormalTexture, GROUND_TILE, groundDetail, groundMask, type GroundKind, mapsTexture, paintTexture, sealTexture, type SealKind, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
   buildGuardRails, buildGuidePosts, buildTrees, treeTrunks, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
-import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, pointInRing, type Building } from "./buildings";
+import { buildBuildings, centroid, detectBuildings, filterBuildings, fromOsm, isRectangle, pointInRing, ringArea, usedFinishes, type Building } from "./buildings";
+import { dressBuilding, FACADES, facadeTexture, ROOF_COLOURS, roofTexture } from "./buildingStyles";
 import { camerasIni, placeCameras } from "./cameras";
 import { cullable } from "./cull";
 import { extConfig } from "./cspConfig";
@@ -359,6 +360,60 @@ function groundMaterial(name: string, diffuse: string, mask: string, light: { am
   return multilayerMaterial(name, diffuse, mask, light, [groundLayer("grass"), groundLayer("dirt"), groundLayer("plain"), { texture: "black.png", metres: 1 }], 2);
 }
 
+/**
+ * Decides what each building is (buildingStyles.ts) from what's known: its
+ * OSM type and height, a point of interest inside it, the roof colour in
+ * the photo, and which wall faces the street (found here when the footprint
+ * didn't come with one) and how far back it sits.
+ */
+function dressBuildings(buildings: Building[], ctx: {
+  /** Distance from a point to the nearest road edge (route or street), metres. */
+  roadEdge: (x: number, y: number) => number;
+  pois: { at: Vec2; cls: string; subclass: string }[];
+  queensland: boolean;
+}): void {
+  const SHOPLIKE = /^(shop|grocery|clothing_store|cafe|restaurant|fast_food|bar|pub)$/;
+  buildings.forEach((b, i) => {
+    if (!b.front && b.ring.length >= 3) {
+      // The wall nearest a road that faces it.
+      let best = -1, bestD = 25;
+      const ccw = ringArea(b.ring) >= 0;
+      b.ring.forEach((p, k) => {
+        const q = b.ring[(k + 1) % b.ring.length];
+        const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        if (len < 3) return;
+        const m: Vec2 = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+        const out: Vec2 = ccw ? [(q[1] - p[1]) / len, -(q[0] - p[0]) / len] : [-(q[1] - p[1]) / len, (q[0] - p[0]) / len];
+        const d = ctx.roadEdge(m[0], m[1]);
+        if (d < bestD && ctx.roadEdge(m[0] + out[0] * 2, m[1] + out[1] * 2) < d - 1) {
+          bestD = d;
+          best = k;
+        }
+      });
+      if (best >= 0) {
+        b.front = [b.ring[best], b.ring[(best + 1) % b.ring.length]];
+        b.setback = bestD;
+      }
+    }
+    const inside = ctx.pois.filter((p) => pointInRing(p.at[0], p.at[1], b.ring));
+    const poi = inside.find((p) => SHOPLIKE.test(p.cls)) ?? inside[0];
+    const tags = b.tags ?? {};
+    const knownHeight = !!(tags.height || tags["building:levels"] || (tags.render_height && tags.render_height !== "5"));
+    const dress = dressBuilding({
+      height: b.source === "osm" && knownHeight ? b.height : undefined,
+      kind: tags.building,
+      area: Math.abs(ringArea(b.ring)),
+      poi: poi?.cls,
+      photoRoof: b.source !== "osm" || tags["roof:colour"] ? b.roofColour : undefined,
+      queensland: ctx.queensland,
+      rectangle: isRectangle(b.ring),
+      fronted: b.setback !== undefined && b.setback < 15,
+      seed: 7919 + i * 31 + Math.round(Math.abs(b.ring[0][0]) * 13),
+    });
+    Object.assign(b, dress, { garage: dress.garage ?? b.garage });
+  });
+}
+
 function countGeometry(node: Kn5Node): { v: number; t: number } {
   if (node.kind === "mesh") return { v: node.positions.length / 3, t: node.indices.length / 3 };
   return node.children.map(countGeometry).reduce((a, b) => ({ v: a.v + b.v, t: a.t + b.t }), { v: 0, t: 0 });
@@ -438,6 +493,8 @@ export async function buildTrack(
     material("grass", "grass.png", { ambient: 0.45, diffuse: 0.4, specular: 0, exp: 1 }),
     material("wall", "wall.png", { ambient: 0.4, diffuse: 0.4, specular: 0, exp: 1 }),
   ];
+  // Raw pixels of the DDS textures, for the 3D preview (browsers can't decode DDS).
+  const previewTextures: TrackResult["previewTextures"] = {};
   const addScenery = (tex: string, data: Uint8Array, mat: Kn5Material) => {
     textures.push({ name: tex, data });
     materials.push(mat);
@@ -498,12 +555,6 @@ export async function buildTrack(
   addScenery("steel.png", solidTexture([120, 122, 126]), material("steel", "steel.png", { ambient: 0.4, diffuse: 0.45, specular: 0.2, exp: 20 }));
   addScenery("concrete.png", concreteTexture(), material("concrete", "concrete.png", { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }));
   addScenery("guidepost.png", postTexture(), material("guidepost", "guidepost.png", { ambient: 0.45, diffuse: 0.45, specular: 0.1, exp: 10 }));
-  for (const f of FACADES) {
-    reliefScenery(`facade_${f}`, facadeTexture(f), { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }, 3);
-  }
-  for (const c of ROOF_COLOURS) {
-    reliefScenery(`roof_${c.name}`, roofTexture(c), { ambient: 0.45, diffuse: 0.45, specular: c.tile ? 0.05 : 0.25, exp: 25 }, 4);
-  }
   const detected: Building[] = [];
   const treeSpots: TreeSpot[] = [];
   const photos: Parameters<typeof chunkPhotoSampler>[0] = [];
@@ -579,12 +630,43 @@ export async function buildTrack(
     .filter((b) => !b.ring.some(([x, y]) => inRoundabout(plan, x, y, opts.vergeWidth + 2)))
     // Detected roofs on a street are paving, not houses; mapped ones get a little more benefit of the doubt.
     .filter((b) => !b.ring.some(([x, y]) => streetIndex.clearance(x, y) < (b.source !== "osm" ? 1 : -0.5)));
+  dressBuildings(kept, {
+    roadEdge: (x, y) => {
+      const n = index.nearest(x, y, 40);
+      return Math.min(n ? n.dist - index.at(n).width / 2 : Infinity, streetIndex.clearance(x, y));
+    },
+    pois: (sources.pois ?? []).map((p) => ({ at: proj.toLocal(p.at), cls: p.cls, subclass: p.subclass })),
+    queensland: proj.origin[1] > -29.2 && proj.origin[1] < -10 && proj.origin[0] > 138,
+  });
+  // Only the wall and roof finishes these buildings wear go in the file.
+  const finishes = usedFinishes(kept);
+  // As DXT1 (a sixth of the PNG's size for these noisy textures), with a normal map from their shading.
+  const buildingScenery = (name: string, png: Uint8Array, light: { ambient: number; diffuse: number; specular: number; exp: number }, strength: number) => {
+    const { rgba, width, height } = decodeOwnPng(png);
+    textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(rgba, width, height) });
+    previewTextures[`${name}.dds`] = { rgba, width, height };
+    if (!opts.detailShaders) {
+      materials.push(material(name, `${name}.dds`, light));
+      return;
+    }
+    textures.push({ name: `${name}_nm.dds`, data: encodeDdsDxt1(normalFromHeight(rgba, width, height, strength), width, height) });
+    materials.push(nmMaterial(name, `${name}.dds`, `${name}_nm.dds`, light));
+  };
+  for (const fi of finishes.facades) {
+    const fc = FACADES[fi];
+    buildingScenery(`facade_${fc.name}`, facadeTexture(fc), fc.wall === "glass"
+      ? { ambient: 0.35, diffuse: 0.35, specular: 0.6, exp: 60 }
+      : { ambient: 0.45, diffuse: 0.45, specular: 0.05, exp: 10 }, fc.wall === "glass" ? 1 : 3);
+  }
+  for (const ri of finishes.roofs) {
+    const c = ROOF_COLOURS[ri];
+    buildingScenery(`roof_${c.name}`, roofTexture(c), { ambient: 0.45, diffuse: 0.45, specular: c.kind === "metal" ? 0.25 : 0.05, exp: 25 }, 4);
+  }
 
   await progress("Building road and terrain meshes");
   // Road surface per chunk: dense asphalt on major roads and in built-up
   // areas, chip seal on rural roads (the usual Australian split).
   const centres = kept.map((b) => b.ring[0]);
-  const previewTextures: TrackResult["previewTextures"] = {};
   const surfaceMaterials = new Set<string>();
   const roadMaterial = (ci: number, meanWidth: number, mid: RoadSample): string => {
     let kind: SealKind;
