@@ -11,6 +11,7 @@ import { createPreview, type PreviewScene } from "./preview";
 import { renderArt } from "../services/art";
 import { loadRouteRaster } from "../services/raster";
 import { fetchSeen, savedToken, saveToken } from "../services/mapillary";
+import { decodeSession, encodeSession } from "./session";
 import { classWidths, fetchTileFeatures, roadClassLookup } from "../services/vectorTiles";
 
 const MAX_KM = 30;
@@ -123,6 +124,7 @@ function renderPins(): void {
   });
   $<HTMLButtonElement>("reverse").disabled = pins.length < 2;
   $<HTMLButtonElement>("clear").disabled = pins.length === 0;
+  saveSession();
   $("pin-hint").textContent = pins.length === 0
     ? "Click the map where the road starts, then where it finishes. More clicks extend the route through those points."
     : pins.length === 1
@@ -147,6 +149,7 @@ function renderZones(): void {
     ? "Click the map to place it."
     : `${zones.length} no-trace ${zones.length === 1 ? "zone" : "zones"}: click one to remove it.`;
   $("add-zone").setAttribute("aria-pressed", String(zoneMode));
+  saveSession();
 }
 function addZone(at: LngLat): void {
   const circle = L.circle([at[1], at[0]], { radius: ZONE_RADIUS, color: "#e0457b", weight: 2, fillOpacity: 0.12 }).addTo(map);
@@ -262,7 +265,10 @@ async function suggestName(r: Route): Promise<void> {
     // names are a nicety
   }
 }
-$("name").addEventListener("input", () => (nameTouched = true));
+$("name").addEventListener("input", () => {
+  nameTouched = true;
+  saveSession();
+});
 
 function updateBuildButton(): void {
   const ok = !!current && current.distance >= 300 && current.distance <= MAX_KM * 1000 && !building;
@@ -541,7 +547,78 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("preview").hidden) $("preview-close").click();
 });
 
+/* ---------------- the session in the address ---------------- */
+
+// Every setting except the search box, the loop and name (kept separately) and secrets.
+const NOT_SAVED = new Set(["search", "loop", "name", "mapillaryToken"]);
+type Control = HTMLInputElement | HTMLSelectElement;
+const controls = (): Control[] => [...document.querySelectorAll<Control>("input[id], select[id]")]
+  .filter((c) => !NOT_SAVED.has(c.id) && c.type !== "password");
+const valueOf = (c: Control) => (c instanceof HTMLInputElement && c.type === "checkbox" ? (c.checked ? "1" : "0") : c.value);
+const defaults = new Map(controls().map((c) => [c.id, valueOf(c)]));
+let restoring = true; // nothing is saved until the last session is back
+
+function saveSession(): void {
+  if (restoring) return;
+  const options: Record<string, string> = {};
+  for (const c of controls()) if (valueOf(c) !== defaults.get(c.id)) options[c.id] = valueOf(c);
+  const hash = encodeSession({
+    pins, loop: $<HTMLInputElement>("loop").checked, zones: zones.map((z) => z.at),
+    name: nameTouched ? $<HTMLInputElement>("name").value.trim() : "", options,
+  });
+  history.replaceState(null, "", hash ? `#${hash}` : location.pathname + location.search);
+  try {
+    localStorage.setItem("act:session", hash);
+  } catch {
+    // private mode: the address still has it
+  }
+}
+
+function restoreSession(): void {
+  let hash = location.hash.length > 1 ? location.hash : "";
+  if (!hash) {
+    try {
+      hash = localStorage.getItem("act:session") ?? "";
+    } catch {
+      hash = "";
+    }
+  }
+  const s = decodeSession(hash);
+  for (const c of controls()) {
+    const v = s.options[c.id];
+    if (v === undefined) continue;
+    if (c instanceof HTMLInputElement && c.type === "checkbox") c.checked = v === "1";
+    else c.value = v;
+  }
+  $<HTMLInputElement>("loop").checked = s.loop;
+  if (s.name) {
+    $<HTMLInputElement>("name").value = s.name;
+    nameTouched = true;
+  }
+  s.zones.forEach(addZone);
+  pins = s.pins;
+  if (pins.length) map.fitBounds(L.latLngBounds(pins.map(([lng, lat]) => [lat, lng] as [number, number])).pad(0.3));
+}
+
+document.addEventListener("change", (e) => {
+  if ((e.target as Element | null)?.matches?.("input[id], select[id]")) saveSession();
+});
+$("share").onclick = async () => {
+  const btn = $<HTMLButtonElement>("share");
+  try {
+    await navigator.clipboard.writeText(location.href);
+    btn.textContent = "Link copied";
+  } catch {
+    btn.textContent = "Copy the address bar";
+  }
+  setTimeout(() => (btn.textContent = "Copy link"), 2000);
+};
+
+restoreSession();
+restoring = false;
 renderPins();
+renderZones();
+if (pins.length >= 2) refreshRoute();
 $<HTMLInputElement>("mapillaryToken").value = savedToken();
 
 // Test hook for the browser smoke test (dev server only).

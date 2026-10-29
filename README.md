@@ -91,6 +91,11 @@ npm test           # format round-trips + a full synthetic build
 npm run build      # static site in dist/, host it anywhere
 ```
 
+The page keeps your road in its address: the pins, no-trace zones, track
+name and any settings you changed. Reloading brings it back, and **Copy
+link** gives a link that reproduces the build (your Mapillary token is
+never in it).
+
 ## Installing a track
 
 Drag the downloaded zip onto Content Manager and click **Install**, or unzip
