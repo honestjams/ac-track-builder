@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { unzlibSync } from "fflate";
-import { detailTexture, grassAlpha, layerMask } from "../src/core/textures";
+import { detailTexture, groundClasses, groundDetail, groundMask } from "../src/core/textures";
 
 /** Mean brightness of an RGB PNG (8-bit, no filtering tricks needed: decode with zlib and undo filters roughly). */
 function pngMean(png: Uint8Array): number {
@@ -34,17 +34,18 @@ function pngMean(png: Uint8Array): number {
 
 describe("detail-mapped materials", () => {
   it("keeps detail textures near white, so they add grain without darkening the surface", () => {
-    for (const k of ["asphalt", "chipseal", "grass"] as const) {
+    for (const k of ["asphalt", "chipseal"] as const) {
       const m = pngMean(detailTexture(k));
       expect(m).toBeGreaterThan(0.82);
       expect(m).toBeLessThan(0.99);
     }
   });
 
-  it("marks lawns and dry grass for detail (alpha 0), not roofs, roads or water", () => {
+  it("tells grass, bare earth and everything else apart in the photo", () => {
     const colours: [number, number, number][] = [
       [70, 110, 50], // lawn
       [170, 150, 100], // dry grass
+      [150, 105, 70], // bare red-brown earth
       [90, 90, 95], // asphalt
       [200, 200, 205], // pale roof
       [40, 90, 140], // pool
@@ -52,26 +53,48 @@ describe("detail-mapped materials", () => {
     const w = colours.length * 4, h = 4;
     const rgba = new Uint8Array(w * h * 4);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) rgba.set([...colours[Math.floor(x / 4)], 255], (y * w + x) * 4);
-    const a = grassAlpha(rgba, w, h);
-    const mid = (k: number) => a[1 * w + k * 4 + 2]; // away from the blurred borders
-    expect(mid(0)).toBeLessThan(10);
-    expect(mid(1)).toBeLessThan(10);
-    expect(mid(2)).toBeGreaterThan(245);
-    expect(mid(3)).toBeGreaterThan(245);
-    expect(mid(4)).toBeGreaterThan(245);
+    const { grass, dirt } = groundClasses(rgba, w, h);
+    const at = (k: number) => 1 * w + k * 4 + 2; // away from the blurred borders
+    expect(grass[at(0)]).toBeGreaterThan(0.95);
+    expect(grass[at(1)]).toBeGreaterThan(0.95);
+    expect(dirt[at(2)]).toBeGreaterThan(0.95);
+    for (const k of [3, 4, 5]) expect(grass[at(k)] + dirt[at(k)]).toBeLessThan(0.05);
   });
 });
 
-describe("multilayer mask", () => {
-  it("weights grass in R and everything else in G, at a quarter the photo's size", () => {
-    const w = 1024, h = 1024;
+describe("ground detail and its mask", () => {
+  it("weights grass in R, dirt in G and the rest in B, at most 256 texels a side", () => {
+    const w = 1024, h = 512;
     const rgba = new Uint8Array(w * h * 4);
-    for (let i = 0; i < w * h; i++) rgba.set(i % w < w / 2 ? [70, 110, 50, 255] : [200, 200, 205, 255], i * 4);
-    const m = layerMask(rgba, w, h);
-    expect(m.size).toBe(256);
+    for (let i = 0; i < w * h; i++) {
+      const x = i % w;
+      rgba.set(x < w / 3 ? [70, 110, 50, 255] : x < (2 * w) / 3 ? [150, 105, 70, 255] : [200, 200, 205, 255], i * 4);
+    }
+    const m = groundMask(rgba, w, h);
+    expect([m.width, m.height]).toEqual([256, 256]);
     const px = (x: number, y: number) => Array.from(m.rgba.slice((y * 256 + x) * 4, (y * 256 + x) * 4 + 4));
-    expect(px(40, 100)).toEqual([255, 0, 0, 255]); // lawn: all grass detail
-    expect(px(200, 100)).toEqual([0, 255, 0, 255]); // roof: the white layer, photo unchanged
+    expect(px(40, 100)).toEqual([255, 0, 0, 255]); // lawn
+    expect(px(128, 100)).toEqual([0, 255, 0, 255]); // bare earth
+    expect(px(220, 100)).toEqual([0, 0, 255, 255]); // roof
+    for (let i = 0; i < 256 * 256; i++) expect(m.rgba[i * 4] + m.rgba[i * 4 + 1] + m.rgba[i * 4 + 2]).toBe(255);
+  });
+
+  it("makes each detail mid grey on average with strong contrast, so doubled it keeps the photo's brightness", () => {
+    for (const k of ["grass", "dirt", "plain"] as const) {
+      const px = groundDetail(k);
+      let sum = 0, sq = 0;
+      const n = px.length / 4;
+      for (let i = 0; i < n; i++) {
+        const l = (px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2]) / 3 / 255;
+        sum += l;
+        sq += l * l;
+      }
+      const mean = sum / n, sd = Math.sqrt(sq / n - mean * mean);
+      expect(mean).toBeGreaterThan(0.47);
+      expect(mean).toBeLessThan(0.53);
+      if (k === "plain") expect(sd).toBeLessThan(0.05);
+      else expect(sd).toBeGreaterThan(0.1);
+    }
   });
 });
 

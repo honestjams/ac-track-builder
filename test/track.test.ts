@@ -230,18 +230,21 @@ describe("buildTrack (aerial imagery, detail shaders)", async () => {
   });
   const kn5 = readKn5(result.files["photo_ground/photo_ground.kn5"]);
 
-  it("lays grass detail on the photo's lawns with ksMultilayer and a small mask, the photo left without alpha", () => {
-    const ground = kn5.materials.filter((m) => m.name.startsWith("terrain_"));
-    expect(ground.length).toBeGreaterThan(0);
+  it("lays grass, dirt and plain detail over the photo by a small mask, the photo left without alpha", () => {
+    const ground = kn5.materials.filter((m) => m.name.startsWith("terrain_") || m.name === "grass" || m.name === "verge");
+    expect(ground.length).toBeGreaterThan(2);
     for (const m of ground) {
       expect(m.shader).toBe("ksMultilayer");
       expect(m.registers).toEqual({ txDiffuse: 0, txMask: 1, txDetailR: 2, txDetailG: 3, txDetailB: 4, txDetailA: 5 });
-      expect(m.textures.txDetailR).toBe("detail_grass.png");
-      expect(m.textures.txDetailG).toBe("detail_white.png");
-      expect(m.properties.find((p) => p.name === "multR")?.a).toBeCloseTo(1 / 0.9, 4);
-      expect(m.properties.find((p) => p.name === "multA")?.b).toEqual([1, 1]);
-      const mask = kn5.textures.find((t) => t.name === m.textures.txMask);
-      expect(mask && mask.data.length).toBeLessThan(50_000); // 256 px DXT1 with mipmaps
+      expect([m.textures.txDetailR, m.textures.txDetailG, m.textures.txDetailB, m.textures.txDetailA])
+        .toEqual(["ground_grass.dds", "ground_dirt.dds", "ground_plain.dds", "black.png"]);
+      expect(m.properties.find((p) => p.name === "multR")?.a).toBeCloseTo(1 / 1.6, 4);
+      expect(m.properties.find((p) => p.name === "magicMult")?.a).toBe(2);
+      expect(kn5.textures.some((t) => t.name === m.textures.txMask)).toBe(true);
+    }
+    for (const m of ground.filter((g) => g.name.startsWith("terrain_"))) {
+      const mask = kn5.textures.find((t) => t.name === m.textures.txMask)!;
+      expect(mask.data.length).toBeLessThan(50_000); // 256 px DXT1 with mipmaps
       expect(m.textures.txDiffuse.endsWith(".png")).toBe(true);
     }
   });

@@ -23,7 +23,7 @@ import { encodeDdsDxt1, encodeDdsDxt5 } from "./dds";
 import { decodeOwnPng, encodePng } from "./png";
 import { buildMarkings, type DiscreteMark } from "./markings";
 import { buildTerrainChunk, makeTerrainFn, planTerrainChunks, type TerrainChunk } from "./terrain";
-import { BARRIERS, barrierTexture, detailTexture, normalFromHeight, windowTexture, flatNormalTexture, layerMask, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
+import { BARRIERS, barrierTexture, detailTexture, normalFromHeight, windowTexture, flatNormalTexture, GROUND_TILE, groundDetail, groundMask, type GroundKind, mapsTexture, FACADES, paintTexture, sealTexture, type SealKind, facadeTexture, garageTexture, grassTexture, concreteTexture, postTexture, railTexture, ROOF_COLOURS, roofTexture, solidTexture, treeAtlas, vergeTexture } from "./textures";
 import {
   buildGuardRails, buildGuidePosts, buildTrees, treeTrunks, filterTrees, railNeeds, treeSpotsFromImagery, type TreeSpot,
 } from "./scenery";
@@ -314,20 +314,19 @@ type Layer = { texture: string; metres: number };
 
 /**
  * A ksMultilayer material: the diffuse texture multiplied by four tiling
- * details, weighted by txMask's R, G, B and A. The details are projected from
- * above in world metres (one tile every `metres`), so they keep their scale
- * on every chunk. Unused layers are white, scale 1. Parameter names as the
- * game's shader declares them (multA is a float2).
+ * details, weighted by txMask's R, G, B and A, then by `magicMult`. The
+ * details are projected from above in world metres (one tile every
+ * `metres`), so they keep their scale on every chunk. Parameter names as
+ * the game's shader declares them (multA is a float2).
  */
 function multilayerMaterial(
   name: string,
   diffuse: string,
   mask: string,
   light: { ambient: number; diffuse: number; specular: number; exp: number },
-  layers: { r?: Layer; g?: Layer; b?: Layer; a?: Layer },
+  [r, g, b, a]: [Layer, Layer, Layer, Layer],
+  magicMult: number,
 ): Kn5Material {
-  const white: Layer = { texture: "detail_white.png", metres: 1 };
-  const [r, g, b, a] = [layers.r, layers.g, layers.b, layers.a].map((l) => l ?? white);
   return {
     name,
     shader: "ksMultilayer",
@@ -342,10 +341,22 @@ function multilayerMaterial(
       { name: "multG", a: 1 / g.metres },
       { name: "multB", a: 1 / b.metres },
       { name: "multA", b: [1 / a.metres, 1 / a.metres] },
-      { name: "magicMult", a: 1 },
+      { name: "magicMult", a: magicMult },
     ],
     textures: { txDiffuse: diffuse, txMask: mask, txDetailR: r.texture, txDetailG: g.texture, txDetailB: b.texture, txDetailA: a.texture },
   };
+}
+
+const groundLayer = (k: GroundKind): Layer => ({ texture: `ground_${k}.dds`, metres: GROUND_TILE[k] });
+
+/**
+ * Ground under a photo (or a plain grass or gravel texture): grass, dirt
+ * and plain detail by the mask's R, G and B, each mid grey on average and
+ * doubled, so from a distance the photo is unchanged and up close it has
+ * blades, clods and grain. A is black: a DXT1 mask reads 1 there.
+ */
+function groundMaterial(name: string, diffuse: string, mask: string, light: { ambient: number; diffuse: number; specular: number; exp: number }): Kn5Material {
+  return multilayerMaterial(name, diffuse, mask, light, [groundLayer("grass"), groundLayer("dirt"), groundLayer("plain"), { texture: "black.png", metres: 1 }], 2);
 }
 
 function countGeometry(node: Kn5Node): { v: number; t: number } {
@@ -431,6 +442,17 @@ export async function buildTrack(
     textures.push({ name: tex, data });
     materials.push(mat);
   };
+  /** A ground mask for a photo texture (see groundMask); returns the mask's texture name. */
+  const photoMask = (name: string, rgba: Uint8Array | Uint8ClampedArray, w: number, h: number) => {
+    const mask = groundMask(rgba, w, h);
+    textures.push({ name: `${name}_mask.dds`, data: encodeDdsDxt1(mask.rgba, mask.width, mask.height) });
+    return `${name}_mask.dds`;
+  };
+  /** A photo of the ground beside the road: ground detail on it with detail shaders, else plain. */
+  const photoGroundMaterial = (name: string, tex: string, img: { rgba: Uint8Array; width: number; height: number }) => {
+    const light = { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 };
+    return opts.detailShaders ? groundMaterial(name, tex, photoMask(name, img.rgba, img.width, img.height), light) : material(name, tex, light);
+  };
   addScenery("trees.png", treeAtlas(), {
     ...material("trees", "trees.png", { ambient: 0.55, diffuse: 0.35, specular: 0, exp: 1 }),
     shader: "ksPerPixelAT",
@@ -460,8 +482,14 @@ export async function buildTrack(
   addScenery("letterbox.png", solidTexture([168, 52, 40]), material("letterbox", "letterbox.png", { ambient: 0.45, diffuse: 0.45, specular: 0.25, exp: 25 }));
   // Shared textures for detail-mapped materials.
   if (opts.detailShaders) {
-    for (const k of ["asphalt", "chipseal", "grass"] as const) textures.push({ name: `detail_${k}.png`, data: detailTexture(k) });
-    textures.push({ name: "detail_white.png", data: solidTexture([255, 255, 255]) });
+    for (const k of ["asphalt", "chipseal"] as const) textures.push({ name: `detail_${k}.png`, data: detailTexture(k) });
+    for (const k of ["grass", "dirt", "plain"] as const) textures.push({ name: `ground_${k}.dds`, data: encodeDdsDxt1(groundDetail(k), 512, 512) });
+    textures.push({ name: "black.png", data: solidTexture([0, 0, 0]) });
+    // The plain grass and gravel textures: all grass, all dirt.
+    textures.push({ name: "mask_grass.png", data: solidTexture([255, 0, 0]) }, { name: "mask_dirt.png", data: solidTexture([0, 255, 0]) });
+    const swap = (m: Kn5Material) => materials.splice(materials.findIndex((x) => x.name === m.name), 1, m);
+    swap(groundMaterial("grass", "grass.png", "mask_grass.png", { ambient: 0.45, diffuse: 0.4, specular: 0, exp: 1 }));
+    swap(groundMaterial("verge", "verge.png", "mask_dirt.png", { ambient: 0.45, diffuse: 0.4, specular: 0, exp: 1 }));
     textures.push({ name: "flat_nm.png", data: flatNormalTexture() });
     textures.push({ name: "maps_ground.png", data: mapsTexture(0.1, 0.15, 0) });
     textures.push({ name: "maps_asphalt.png", data: mapsTexture(0.7, 0.5, 0.35) });
@@ -494,14 +522,9 @@ export async function buildTrack(
       // Aerial photos carry their own light and shadow, so lean on ambient.
       const photoLight = { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 };
       if (opts.detailShaders && img.rgba && job.prefix === "terrain") {
-        // Grass detail on the photo's lawns and dry grass, placed by a small mask; the photo stays DXT1.
-        const mask = layerMask(img.rgba, job.size, job.size);
-        const maskTex = `${job.prefix}_${job.chunk.key}_mask.dds`;
+        // Grass, dirt and plain detail where the photo shows them, placed by a small mask; the photo stays DXT1.
         textures.push({ name: tex, data: img.data });
-        textures.push({ name: maskTex, data: encodeDdsDxt1(mask.rgba, mask.size, mask.size) });
-        materials.push(multilayerMaterial(`${job.prefix}_${job.chunk.key}`, tex, maskTex, photoLight, {
-          r: { texture: "detail_grass.png", metres: 0.9 },
-        }));
+        materials.push(groundMaterial(`${job.prefix}_${job.chunk.key}`, tex, photoMask(`${job.prefix}_${job.chunk.key}`, img.rgba, job.size, job.size), photoLight));
       } else {
         textures.push({ name: tex, data: img.data });
         materials.push(material(`${job.prefix}_${job.chunk.key}`, tex, photoLight));
@@ -691,7 +714,7 @@ export async function buildTrack(
     const tex = stripPhotoTexture(plan, displayOf(raster), opts, a, b);
     textures.push({ name: `${name}.dds`, data: encodeDdsDxt1(tex.rgba, tex.width, tex.height) });
     previewTextures[`${name}.dds`] = tex;
-    materials.push(material(name, `${name}.dds`, { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
+    materials.push(photoGroundMaterial(name, `${name}.dds`, tex));
     return { material: name, photo: true };
   };
   // Kerbs round the corners into side streets, carrying on along each one's first 40 m; then along the road.
@@ -741,12 +764,12 @@ export async function buildTrack(
   if (returns?.sideAtlas) {
     textures.push({ name: "sidestrips_photo.dds", data: encodeDdsDxt1(returns.sideAtlas.rgba, returns.sideAtlas.width, returns.sideAtlas.height) });
     previewTextures["sidestrips_photo.dds"] = returns.sideAtlas;
-    materials.push(material("sidestrips_photo", "sidestrips_photo.dds", { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
+    materials.push(photoGroundMaterial("sidestrips_photo", "sidestrips_photo.dds", returns.sideAtlas));
   }
   if (returns?.atlas) {
     textures.push({ name: "returns_photo.dds", data: encodeDdsDxt1(returns.atlas.rgba, returns.atlas.width, returns.atlas.height) });
     previewTextures["returns_photo.dds"] = returns.atlas;
-    materials.push(material("returns_photo", "returns_photo.dds", { ambient: 0.6, diffuse: 0.2, specular: 0, exp: 1 }));
+    materials.push(photoGroundMaterial("returns_photo", "returns_photo.dds", returns.atlas));
   }
   // Footpaths and driveway crossovers in the nature strip, where the photo shows them; the kerb lays back at each driveway.
   const stripOuter = opts.vergeWidth + STRIP_EXTRA;

@@ -55,11 +55,18 @@ writer looks them up (`TEXTURE_REGISTER` in `kn5.ts`).
   seal texture with alpha 0 everywhere (DXT5), aggregate stones as the
   detail (~0.8 m a tile), drawn squashed 3:1 because road UVs run 24 m along
   for about 8 m across, so on the road they come out round.
-- **Ground** (`terrain_*`): `ksMultilayer`. The aerial photo stays DXT1;
-  a 256 px mask per chunk (R where the photo shows lawn, dry grass or bare
-  earth; G everywhere else) puts grass blades (one tile every 0.9 m, in
-  world metres) on the grass and a white detail on the rest, so roofs,
-  roads and water look exactly as photographed. The mask is ~43 KB a chunk.
+- **Ground** (`terrain_*`, the photo nature strips `strip_photo_*`,
+  `sidestrips_photo`, `returns_photo`, and the plain `grass` and `verge`):
+  `ksMultilayer`, the standard way photo-textured tracks get close-up
+  detail. The aerial photo gives the colour; three tiling details give the
+  texture: grass blades (a tile every 1.6 m), dirt with clods, pebbles and
+  cracks (2.4 m) and a faint grain for paving and the rest (2 m). Each is
+  mid grey on average and `magicMult` is 2, so from a distance the photo is
+  unchanged and up close the ground has detail the photo (30 cm a pixel at
+  best) can't. A small mask per photo (256 px at most a side, ~43 KB) says
+  which is where, from the photo's colour: green or dry yellow grass (R),
+  red-brown earth or sand (G), everything else (B). A is unused and its
+  detail black, because a DXT1 mask reads 1 there.
 - **Road relief**: each seal texture's normal map comes from its own
   shading, brightness as height, so cracks and patch edges are grooves
   (DirectX convention, green down).
@@ -70,7 +77,8 @@ writer looks them up (`TEXTURE_REGISTER` in `kn5.ts`).
   which CSP turns into lit rooms at night.
 - Turned off with **Detail shaders** in the options, everything is plain
   `ksPerPixel` as before. The cost is small now: the road seals carry an
-  alpha channel (DXT5) and each ground chunk a small mask. (An earlier
+  alpha channel (DXT5), each ground photo a small mask, and the three
+  ground details are 512 px DXT1 (about 170 KB each). (An earlier
   version put the grass mask in the ground photo's alpha, which needed DXT5
   for every photo and added about 25 MB to a 1.8 km suburban build.)
 
@@ -106,8 +114,8 @@ Most players run CSP. A track can ship its own config at
 - **Ambient occlusion**: CSP expects tracks to have it, and nothing does
   more for how solid a scene looks. It is baked on the player's PC with
   CSP's AO bakery (any hardware), so the README tells players how.
-- **More ground layers**: the mask has two free channels (B, A), room for
-  dirt or gravel details where the photo shows them.
+- **Ground normal maps**: `ksMultilayer_fresnel_nm` adds a normal map per
+  detail, so grass and clods catch the light.
 
 ## Sources
 

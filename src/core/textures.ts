@@ -552,7 +552,7 @@ export function barrierTexture(kind: (typeof BARRIERS)[number]): Uint8Array {
  * is kept close to white so it adds grain without darkening the surface.
  * txMaps: R scales specular, G glossiness, B sun specular.
  */
-export type DetailKind = "asphalt" | "chipseal" | "grass";
+export type DetailKind = "asphalt" | "chipseal";
 
 /**
  * A tileable 256 px close-up detail. Asphalt and chip seal are drawn
@@ -562,34 +562,23 @@ export type DetailKind = "asphalt" | "chipseal" | "grass";
 export function detailTexture(kind: DetailKind): Uint8Array {
   const w = 256, h = 256;
   const r = rng(301 + kind.length * 7);
-  const base = valueNoise(w, h, kind === "grass" ? 16 : 8, 302);
+  const base = valueNoise(w, h, 8, 302);
   const px = new Float32Array(w * h).fill(1);
-  if (kind === "grass") {
-    // Blades: short dark and light strokes in every direction, over a gentle mottle.
-    for (let i = 0; i < 9000; i++) {
-      const x0 = r() * w, y0 = r() * h, a = r() * Math.PI, len = 3 + r() * 6, k = r() < 0.6 ? 0.78 + r() * 0.1 : 1;
-      for (let t = 0; t < len; t++) {
-        const x = Math.floor(x0 + Math.cos(a) * t + w) % w, y = Math.floor(y0 + Math.sin(a) * t + h) % h;
+  // Aggregate: stones, darker and lighter than the binder, round on the road.
+  const n = kind === "chipseal" ? 2600 : 5200, rx = kind === "chipseal" ? 4.5 : 2.4;
+  for (let i = 0; i < n; i++) {
+    const cx = r() * w, cy = r() * h, rad = rx * (0.6 + r() * 0.8), k = r() < 0.55 ? 0.72 + r() * 0.12 : 0.97 + r() * 0.03;
+    for (let dy = -Math.ceil(rad / 3); dy <= Math.ceil(rad / 3); dy++) {
+      for (let dx = -Math.ceil(rad); dx <= Math.ceil(rad); dx++) {
+        if ((dx / rad) ** 2 + ((dy * 3) / rad) ** 2 > 1) continue;
+        const x = (Math.floor(cx) + dx + w) % w, y = (Math.floor(cy) + dy + h) % h;
         px[y * w + x] = Math.min(px[y * w + x], k);
-      }
-    }
-  } else {
-    // Aggregate: stones, darker and lighter than the binder, round on the road.
-    const n = kind === "chipseal" ? 2600 : 5200, rx = kind === "chipseal" ? 4.5 : 2.4;
-    for (let i = 0; i < n; i++) {
-      const cx = r() * w, cy = r() * h, rad = rx * (0.6 + r() * 0.8), k = r() < 0.55 ? 0.72 + r() * 0.12 : 0.97 + r() * 0.03;
-      for (let dy = -Math.ceil(rad / 3); dy <= Math.ceil(rad / 3); dy++) {
-        for (let dx = -Math.ceil(rad); dx <= Math.ceil(rad); dx++) {
-          if ((dx / rad) ** 2 + ((dy * 3) / rad) ** 2 > 1) continue;
-          const x = (Math.floor(cx) + dx + w) % w, y = (Math.floor(cy) + dy + h) % h;
-          px[y * w + x] = Math.min(px[y * w + x], k);
-        }
       }
     }
   }
   return encodePng(fill(w, h, (_x, _y, i) => {
     const v = 255 * px[i] * (0.94 + base[i] * 0.06);
-    return kind === "grass" ? [v * 0.97, v, v * 0.94] : [v, v, v];
+    return [v, v, v];
   }), w, h, { alpha: false });
 }
 
@@ -604,62 +593,153 @@ export function mapsTexture(spec: number, gloss: number, sun: number): Uint8Arra
 }
 
 /**
- * How grassy each pixel of an aerial photo is, as the alpha a multimap
- * reads (0 = full grass detail, 255 = none): green lawns, and the dry
- * yellow-brown grass and bare earth of an Australian summer. Roofs, roads,
- * concrete, water and deep shade keep 255. Softened over 3 px.
+ * What each pixel of an aerial photo shows, as ground-detail weights that
+ * add to 1: grass (green lawns, and dry yellow grass in an Australian
+ * summer), dirt (bare earth: brown and reddish, or pale sand) and plain
+ * (roofs, roads, paving, water, shade). Softened over 3 px.
  */
-export function grassAlpha(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number): Uint8Array {
-  const score = new Float32Array(w * h);
+export function groundClasses(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number): { grass: Float32Array; dirt: Float32Array } {
+  const grass0 = new Float32Array(w * h), dirt0 = new Float32Array(w * h);
   for (let i = 0; i < w * h; i++) {
     const r = rgba[i * 4] / 255, g = rgba[i * 4 + 1] / 255, b = rgba[i * 4 + 2] / 255;
     const l = (r + g + b) / 3, mx = Math.max(r, g, b), mn = Math.min(r, g, b);
     const sat = mx > 0 ? (mx - mn) / mx : 0;
     const exg = (2 * g - r - b) / (r + g + b + 1e-4);
     const green = l > 0.08 && l < 0.6 ? Math.min(1, Math.max(0, exg / 0.08)) : 0;
-    const dry = l > 0.18 && l < 0.62 && r > b * 1.15 && g > b * 1.05 && sat > 0.12 && sat < 0.55 ? 1 : 0;
-    score[i] = Math.max(green, dry);
+    // Warm and earthy: yellow-brown to red-brown, not grey, not too dark or bright.
+    const warm = l > 0.16 && l < 0.7 && r > b * 1.12 && g > b * 1.02 && sat > 0.1 && sat < 0.6 ? 1 : 0;
+    // Earth is redder than dry grass: green falls behind red.
+    const earthy = Math.min(1, Math.max(0, (0.86 - g / Math.max(r, 1e-4)) / 0.08));
+    const dirt = warm * earthy;
+    grass0[i] = Math.max(green, warm * (1 - earthy));
+    dirt0[i] = Math.min(dirt, 1 - grass0[i]);
   }
-  const out = new Uint8Array(w * h);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let s = 0, n = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx, yy = y + dy;
-          if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
-          s += score[yy * w + xx];
-          n++;
+  const blur = (src: Float32Array) => {
+    const out = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let s = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+            s += src[yy * w + xx];
+            n++;
+          }
         }
+        out[y * w + x] = s / n;
       }
-      out[y * w + x] = Math.round(255 * (1 - s / n));
     }
-  }
-  return out;
+    return out;
+  };
+  return { grass: blur(grass0), dirt: blur(dirt0) };
 }
 
 /**
- * A ksMultilayer mask for a ground photo: R is how grassy each texel is (the
- * grass detail), G the rest (a white detail, so the photo shows unchanged),
- * B and A unused. Box-filtered down to `size`, since the grass patches it
- * places are metres across; a few tens of kilobytes instead of an alpha
- * channel on the whole photo.
+ * A ksMultilayer mask for a ground photo: R grass, G dirt, B plain (adding
+ * to 255), A unused. Box-filtered down to at most `max` texels a side; the
+ * patches it places are metres across, so a few tens of kilobytes per
+ * photo instead of an alpha channel on it.
  */
-export function layerMask(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, size = 256): { rgba: Uint8Array; size: number } {
-  const alpha = grassAlpha(rgba, w, h);
-  const n = Math.min(size, w, h);
-  const out = new Uint8Array(n * n * 4);
-  for (let y = 0; y < n; y++) {
-    const y0 = Math.floor((y * h) / n), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * h) / n));
-    for (let x = 0; x < n; x++) {
-      const x0 = Math.floor((x * w) / n), x1 = Math.max(x0 + 1, Math.floor(((x + 1) * w) / n));
-      let s = 0;
-      for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) s += alpha[yy * w + xx];
-      const grass = 255 - Math.round(s / ((y1 - y0) * (x1 - x0)));
-      out.set([grass, 255 - grass, 0, 255], (y * n + x) * 4);
+export function groundMask(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, max = 256): { rgba: Uint8Array; width: number; height: number } {
+  const { grass, dirt } = groundClasses(rgba, w, h);
+  const mw = Math.min(max, w), mh = Math.min(max, h);
+  const out = new Uint8Array(mw * mh * 4);
+  for (let y = 0; y < mh; y++) {
+    const y0 = Math.floor((y * h) / mh), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * h) / mh));
+    for (let x = 0; x < mw; x++) {
+      const x0 = Math.floor((x * w) / mw), x1 = Math.max(x0 + 1, Math.floor(((x + 1) * w) / mw));
+      let sg = 0, sd = 0;
+      for (let yy = y0; yy < y1; yy++) {
+        for (let xx = x0; xx < x1; xx++) {
+          sg += grass[yy * w + xx];
+          sd += dirt[yy * w + xx];
+        }
+      }
+      const n = (y1 - y0) * (x1 - x0);
+      const g = Math.round((255 * sg) / n), d = Math.min(255 - g, Math.round((255 * sd) / n));
+      out.set([g, d, 255 - g - d, 255], (y * mw + x) * 4);
     }
   }
-  return { rgba: out, size: n };
+  return { rgba: out, width: mw, height: mh };
+}
+
+export type GroundKind = "grass" | "dirt" | "plain";
+
+/** How many metres one tile of each ground detail covers. */
+export const GROUND_TILE: Record<GroundKind, number> = { grass: 1.6, dirt: 2.4, plain: 2 };
+
+/**
+ * Tiling ground detail, 512 px, multiplied over the aerial photo by the
+ * multilayer shader at double strength: mid grey on average (so the photo's
+ * colour comes through unchanged from a distance) with strong fine detail
+ * up close, which the photo (30 cm a pixel at best) can't have. Grass:
+ * blades over shaded gaps. Dirt: clods, pebbles and a few cracks. Plain: a
+ * faint grain for paving and the like.
+ */
+export function groundDetail(kind: GroundKind): Uint8Array {
+  const w = 512, h = 512;
+  const r = rng(kind === "grass" ? 411 : kind === "dirt" ? 412 : 413);
+  const lum = new Float32Array(w * h);
+  const tint = new Float32Array(w * h * 3).fill(1);
+  const wrapI = (x: number, y: number) => ((Math.floor(y) % h + h) % h) * w + ((Math.floor(x) % w + w) % w);
+  if (kind === "grass") {
+    const mottle = valueNoise(w, h, 8, 421), fine = valueNoise(w, h, 64, 422);
+    for (let i = 0; i < w * h; i++) lum[i] = 0.14 + 0.12 * mottle[i] + 0.06 * fine[i];
+    // Blades, back to front: each a short tapering stroke, lighter toward the tip.
+    for (let k = 0; k < 26000; k++) {
+      const x0 = r() * w, y0 = r() * h, a = r() * Math.PI * 2, len = 6 + r() * 16;
+      const base = 0.45 + r() * 0.35, dry = r() < 0.2;
+      for (let t = 0; t < len; t++) {
+        const f = t / len, v = base * (0.8 + 0.35 * f);
+        const x = x0 + Math.cos(a) * t, y = y0 + Math.sin(a) * t;
+        for (const [dx, dy] of f < 0.6 ? [[0, 0], [1, 0]] : [[0, 0]]) {
+          const i = wrapI(x + dx, y + dy);
+          lum[i] = v;
+          if (dry) tint.set([1.06, 1.02, 0.86], i * 3);
+          else tint.set([0.97, 1.02, 0.95], i * 3);
+        }
+      }
+    }
+  } else if (kind === "dirt") {
+    const n1 = valueNoise(w, h, 4, 431), n2 = valueNoise(w, h, 16, 432), n3 = valueNoise(w, h, 64, 433), n4 = valueNoise(w, h, 160, 434);
+    for (let i = 0; i < w * h; i++) lum[i] = Math.max(0.05, 0.5 + 1.6 * (0.26 * n1[i] + 0.3 * n2[i] + 0.22 * n3[i] + 0.16 * n4[i] - 0.47));
+    // Pebbles: small lit stones with a shadow on one side.
+    for (let k = 0; k < 700; k++) {
+      const cx = r() * w, cy = r() * h, rad = 1 + r() * r() * 4, v = 0.45 + r() * 0.35;
+      for (let dy = -Math.ceil(rad) - 1; dy <= Math.ceil(rad) + 1; dy++) {
+        for (let dx = -Math.ceil(rad) - 1; dx <= Math.ceil(rad) + 1; dx++) {
+          const d = Math.hypot(dx, dy * 1.2);
+          const i = wrapI(cx + dx, cy + dy);
+          if (d <= rad) lum[i] = v * (1 - 0.25 * (dx + dy) / (2 * rad));
+          else if (d <= rad + 1.2 && dx + dy > 0) lum[i] *= 0.65;
+        }
+      }
+    }
+    // Cracks: dark wandering lines.
+    for (let k = 0; k < 14; k++) {
+      let x = r() * w, y = r() * h, a = r() * Math.PI * 2;
+      for (let t = 0; t < 60 + r() * 120; t++) {
+        a += (r() - 0.5) * 0.6;
+        x += Math.cos(a);
+        y += Math.sin(a);
+        lum[wrapI(x, y)] *= 0.45;
+      }
+    }
+  } else {
+    const n1 = valueNoise(w, h, 32, 441), n2 = valueNoise(w, h, 128, 442);
+    for (let i = 0; i < w * h; i++) lum[i] = 0.46 + 0.04 * n1[i] + 0.04 * n2[i] + (r() - 0.5) * 0.04;
+  }
+  // Mid grey on average, so double strength leaves the photo's brightness as it was.
+  let mean = 0;
+  for (let i = 0; i < w * h; i++) mean += lum[i];
+  const k = 0.5 / (mean / (w * h));
+  const out = new Uint8Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.max(0, Math.min(255, Math.round(255 * lum[i] * k * tint[i * 3 + c])));
+    out[i * 4 + 3] = 255;
+  }
+  return out;
 }
 
 /**

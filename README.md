@@ -108,7 +108,13 @@ up nested too deep.
 
 ## Making it look its best in game
 
-The track works in plain Assetto Corsa. With
+The track works in plain Assetto Corsa. The ground is the aerial photo,
+which is a blur up close (30 cm a pixel at best), so with **Detail shaders**
+on (the default) it carries tiling grass, dirt and paving detail as well,
+picked per spot from the photo's colour: the photo gives the colour, the
+detail the close-up texture, as on hand-made tracks.
+
+With
 [Custom Shaders Patch](https://acstuff.ru/patch/) (CSP) it also reads the
 track's `extension/ext_config.ini`, so turn these on in CSP's settings:
 
@@ -125,7 +131,7 @@ CSP's [vertex AO bakery](https://github.com/ac-custom-shaders-patch/acc-bakeryop
 (runs on any hardware: on the CPU, or the GPU on recent cards): put the
 track in `content/tracks` and run the bakery on its `.kn5`.
 
-If the road or the grass looks wrong up close (too dark, shiny or black),
+If the road or the ground looks wrong up close (too dark or bright, shiny or black),
 untick **Detail shaders** and build again: that goes back to plain
 textures.
 
