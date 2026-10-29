@@ -26,9 +26,10 @@ Rough priority order. Each chunk is a self-contained change.
 8. ~~Close-range detail without CSP~~: detail-mapped road and ground
    (ksPerPixelMultiMap, set up from the shader source). ~~CSP rain, lit
    windows, light pollution, shadow fixes~~. Done; see
-   [realism.md](realism.md). Next from that research: a CSP tree list for
-   instanced 3D trees, ksMultilayer terrain (grass, dirt, gravel, concrete
-   by mask), normal maps for the road and walls.
+   [realism.md](realism.md). ~~ksMultilayer ground~~ (grass by a
+   small mask, so the photo stays DXT1) and ~~normal maps for the road and
+   walls~~. Next from that research: a CSP tree list for instanced 3D trees,
+   dirt and gravel layers in the ground mask.
 9. **Scenery.** Multi-lane roundabouts, front fences where OSM has none
    (read off the photo), house windows lit at night.
 

@@ -639,6 +639,30 @@ export function grassAlpha(rgba: Uint8Array | Uint8ClampedArray, w: number, h: n
 }
 
 /**
+ * A ksMultilayer mask for a ground photo: R is how grassy each texel is (the
+ * grass detail), G the rest (a white detail, so the photo shows unchanged),
+ * B and A unused. Box-filtered down to `size`, since the grass patches it
+ * places are metres across; a few tens of kilobytes instead of an alpha
+ * channel on the whole photo.
+ */
+export function layerMask(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number, size = 256): { rgba: Uint8Array; size: number } {
+  const alpha = grassAlpha(rgba, w, h);
+  const n = Math.min(size, w, h);
+  const out = new Uint8Array(n * n * 4);
+  for (let y = 0; y < n; y++) {
+    const y0 = Math.floor((y * h) / n), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * h) / n));
+    for (let x = 0; x < n; x++) {
+      const x0 = Math.floor((x * w) / n), x1 = Math.max(x0 + 1, Math.floor(((x + 1) * w) / n));
+      let s = 0;
+      for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) s += alpha[yy * w + xx];
+      const grass = 255 - Math.round(s / ((y1 - y0) * (x1 - x0)));
+      out.set([grass, 255 - grass, 0, 255], (y * n + x) * 4);
+    }
+  }
+  return { rgba: out, size: n };
+}
+
+/**
  * Window glass: the sky reflected at the top, darker below, a hint of a
  * curtain behind. One window per texture.
  */

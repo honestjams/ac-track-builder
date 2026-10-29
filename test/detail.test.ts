@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { unzlibSync } from "fflate";
-import { detailTexture, grassAlpha } from "../src/core/textures";
+import { detailTexture, grassAlpha, layerMask } from "../src/core/textures";
 
 /** Mean brightness of an RGB PNG (8-bit, no filtering tricks needed: decode with zlib and undo filters roughly). */
 function pngMean(png: Uint8Array): number {
@@ -59,6 +59,19 @@ describe("detail-mapped materials", () => {
     expect(mid(2)).toBeGreaterThan(245);
     expect(mid(3)).toBeGreaterThan(245);
     expect(mid(4)).toBeGreaterThan(245);
+  });
+});
+
+describe("multilayer mask", () => {
+  it("weights grass in R and everything else in G, at a quarter the photo's size", () => {
+    const w = 1024, h = 1024;
+    const rgba = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) rgba.set(i % w < w / 2 ? [70, 110, 50, 255] : [200, 200, 205, 255], i * 4);
+    const m = layerMask(rgba, w, h);
+    expect(m.size).toBe(256);
+    const px = (x: number, y: number) => Array.from(m.rgba.slice((y * 256 + x) * 4, (y * 256 + x) * 4 + 4));
+    expect(px(40, 100)).toEqual([255, 0, 0, 255]); // lawn: all grass detail
+    expect(px(200, 100)).toEqual([0, 255, 0, 255]); // roof: the white layer, photo unchanged
   });
 });
 

@@ -43,7 +43,10 @@ writer looks them up (`TEXTURE_REGISTER` in `kn5.ts`).
 - **`ksMultilayer` / `ksMultilayer_fresnel_nm`**: the classic terrain and
   road shader. `txMask`'s four channels place four tiling details
   (`txDetailR..A`, scaled by `multR..multA`), blended by `magicMult`. The
-  details are projected from above, so it's only for flat-ish ground.
+  details are projected from above in world metres (`posW.xz * multR`), so
+  it's only for flat-ish ground. Exactly: `diffuse *= (Σ detailX *
+  mask.X) * magicMult`, so where the mask's weights add to 1 and the
+  details are white, the diffuse is unchanged.
 - **`ksTree`, `ksGrass`**: Kunos's tree and grass-tuft shaders.
 
 ## What we use
@@ -52,10 +55,11 @@ writer looks them up (`TEXTURE_REGISTER` in `kn5.ts`).
   seal texture with alpha 0 everywhere (DXT5), aggregate stones as the
   detail (~0.8 m a tile), drawn squashed 3:1 because road UVs run 24 m along
   for about 8 m across, so on the road they come out round.
-- **Ground** (`terrain_*`): `ksPerPixelMultiMap`, the aerial photo with an
-  alpha mask from its colour (0 on lawns, dry grass and bare earth; 255 on
-  roofs, roads, concrete, water), grass blades as the detail (~0.9 m a
-  tile).
+- **Ground** (`terrain_*`): `ksMultilayer`. The aerial photo stays DXT1;
+  a 256 px mask per chunk (R where the photo shows lawn, dry grass or bare
+  earth; G everywhere else) puts grass blades (one tile every 0.9 m, in
+  world metres) on the grass and a white detail on the rest, so roofs,
+  roads and water look exactly as photographed. The mask is ~43 KB a chunk.
 - **Road relief**: each seal texture's normal map comes from its own
   shading, brightness as height, so cracks and patch edges are grooves
   (DirectX convention, green down).
@@ -65,9 +69,10 @@ writer looks them up (`TEXTURE_REGISTER` in `kn5.ts`).
 - **Windows**: glass panes over the painted windows (`window` material),
   which CSP turns into lit rooms at night.
 - Turned off with **Detail shaders** in the options, everything is plain
-  `ksPerPixel` as before. The cost is file size: the ground's grass mask
-  needs DXT5 (alpha) instead of DXT1, about 25 MB more on a 1.8 km
-  suburban build at high imagery.
+  `ksPerPixel` as before. The cost is small now: the road seals carry an
+  alpha channel (DXT5) and each ground chunk a small mask. (An earlier
+  version put the grass mask in the ground photo's alpha, which needed DXT5
+  for every photo and added about 25 MB to a 1.8 km suburban build.)
 
 ## Custom Shaders Patch
 
@@ -101,8 +106,8 @@ Most players run CSP. A track can ship its own config at
 - **Ambient occlusion**: CSP expects tracks to have it, and nothing does
   more for how solid a scene looks. It is baked on the player's PC with
   CSP's AO bakery (any hardware), so the README tells players how.
-- **`ksMultilayer` terrain**: four details by mask (grass, dirt, gravel,
-  concrete) instead of one.
+- **More ground layers**: the mask has two free channels (B, A), room for
+  dirt or gravel details where the photo shows them.
 
 ## Sources
 
