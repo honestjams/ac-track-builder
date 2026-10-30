@@ -56,6 +56,7 @@ describe("buildTrack (synthetic terrain)", async () => {
     expect(names).toEqual([
       "test_hairpin/README.txt",
       "test_hairpin/ai/fast_lane.ai",
+      "test_hairpin/data/ai_hints.ini",
       "test_hairpin/data/cameras_1.ini",
       "test_hairpin/data/map.ini",
       "test_hairpin/data/surfaces.ini",
@@ -113,14 +114,14 @@ describe("buildTrack (synthetic terrain)", async () => {
     expect(startS).toBeGreaterThan(14 + 4 * 8);
     expect(plan.length - finishS).toBeGreaterThan(140);
     expect(result.stats.timedLength).toBeCloseTo(finishS - startS, 0);
-    // Every spawn is behind the start line and faces up the road: the game takes -Z as forward.
+    // Every spawn is behind the start line and faces up the road: the game takes +Z as forward.
     for (const name of ["AC_START_0", "AC_START_7", "AC_PIT_0", "AC_HOTLAP_START_0"]) {
       const t = at(name);
       const [x, y] = ac(t);
       const n = plan.samples.reduce((a, s, i) => (Math.hypot(s.pos[0] - x, s.pos[1] - y) < Math.hypot(plan.samples[a].pos[0] - x, plan.samples[a].pos[1] - y) ? i : a), 0);
       expect(plan.samples[n].s).toBeLessThan(startS);
       const tan = plan.samples[n].tan;
-      const facing = [-t[8], t[10]]; // -Z in local east, north
+      const facing = [t[8], -t[10]]; // +Z in local east, north
       expect(facing[0] * tan[0] + facing[1] * tan[1]).toBeGreaterThan(0.95);
       // On the asphalt, not the verge.
       const p = plan.samples[n];
@@ -166,6 +167,9 @@ describe("buildTrack (synthetic terrain)", async () => {
 
   it("writes an AI line that follows the road from start to finish", () => {
     const ai = readFastLaneAi(result.files["test_hairpin/ai/fast_lane.ai"]);
+    // The hairpin gets a slow-down hint for the AI, inside the lap.
+    const hints = new TextDecoder().decode(result.files["test_hairpin/data/ai_hints.ini"]);
+    expect(hints).toMatch(/\[HINT_0\]\nSTART=0\.\d+\nEND=0\.\d+\nVALUE=0\.6/);
     expect(ai.length).toBe(result.plan.samples.length);
     // distances run along the 3D road, so slightly longer than the map length
     expect(ai[ai.length - 1].distance).toBeGreaterThan(result.plan.length * 0.99);

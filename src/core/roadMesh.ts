@@ -118,7 +118,7 @@ export function buildRoadMeshes(
           vb.quad(p + 4, p + 5, q + 5, q + 4);
         }
       }
-      verge.push(vb.toKn5(`1GRASS_VERGE_${pad(ci)}`, "verge"));
+      if (vb.indices.length) verge.push(vb.toKn5(`1GRASS_VERGE_${pad(ci)}`, "verge"));
     }
   });
 
