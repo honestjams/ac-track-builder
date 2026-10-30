@@ -156,7 +156,7 @@ export function buildTerrainChunk(
           else {
             const u = (i - i0) / K, v = (j - j0) / K;
             const flat = h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
-            if (Math.abs(hs[id(i, j)] - flat) > (dists[id(i, j)] < LOD_FAR ? LOD_TOL : LOD_TOL_FAR)) ok = false;
+            if (Math.abs(hs[id(i, j)] - flat) > (dists[id(i, j)] < LOD_FAR ? LOD_TOL : (opts.terrainLodFarTol ?? LOD_TOL_FAR))) ok = false;
           }
         }
       }
@@ -165,6 +165,32 @@ export function buildTerrainChunk(
   }
   const isCoarse = (bi: number, bj: number) => bi >= 0 && bj >= 0 && bi < B && bj < B && coarse[bj * B + bi] === 1;
   const inCoarse = (i: number, j: number) => isCoarse(Math.floor(i / K), Math.floor(j / K)) && i < B * K && j < B * K;
+
+  // A second level. Well away from the road, a 4 x 4 group of coarse blocks that is
+  // flat as a whole (every node within the far tolerance of the plane through the group's corners)
+  // is one fan too: big flat back yards and paddocks were most of a wide build's triangles.
+  const S = 4, KS = K * S;
+  const B2 = opts.terrainLod ? Math.floor(B / S) : 0;
+  const sup = new Uint8Array(B2 * B2);
+  for (let sj = 0; sj < B2; sj++) {
+    for (let si = 0; si < B2; si++) {
+      let ok = true;
+      for (let bj = sj * S; ok && bj < sj * S + S; bj++) for (let bi = si * S; ok && bi < si * S + S; bi++) if (!isCoarse(bi, bj)) ok = false;
+      const i0 = si * KS, j0 = sj * KS;
+      const h00 = hs[id(i0, j0)], h10 = hs[id(i0 + KS, j0)], h01 = hs[id(i0, j0 + KS)], h11 = hs[id(i0 + KS, j0 + KS)];
+      for (let j = j0; ok && j <= j0 + KS; j++) {
+        for (let i = i0; ok && i <= i0 + KS; i++) {
+          if (dists[id(i, j)] < LOD_FAR) { ok = false; break; }
+          const u = (i - i0) / KS, v = (j - j0) / KS;
+          const flat = h00 * (1 - u) * (1 - v) + h10 * u * (1 - v) + h01 * (1 - u) * v + h11 * u * v;
+          if (Math.abs(hs[id(i, j)] - flat) > (opts.terrainLodFarTol ?? LOD_TOL_FAR)) ok = false;
+        }
+      }
+      sup[sj * B2 + si] = ok ? 1 : 0;
+    }
+  }
+  const isSuper = (si: number, sj: number) => si >= 0 && sj >= 0 && si < B2 && sj < B2 && sup[sj * B2 + si] === 1;
+  const inSuper = (bi: number, bj: number) => isSuper(Math.floor(bi / S), Math.floor(bj / S)) && bi < B2 * S && bj < B2 * S;
 
   const used = new Uint8Array(N * N);
   const quads: number[] = [];
@@ -179,7 +205,7 @@ export function buildTerrainChunk(
   const fans: number[][] = [];
   for (let bj = 0; bj < B; bj++) {
     for (let bi = 0; bi < B; bi++) {
-      if (!isCoarse(bi, bj)) continue;
+      if (!isCoarse(bi, bj) || inSuper(bi, bj)) continue;
       const i0 = bi * K, j0 = bj * K;
       const loop: [number, number][] = [];
       // Edges: south (j0, i rising), east (i0+K, j rising), north (j0+K, i falling), west (i0, j falling).
@@ -196,6 +222,37 @@ export function buildTerrainChunk(
         }
       }
       const c: [number, number] = [i0 + K / 2, j0 + K / 2];
+      for (const [i, j] of [...loop, c]) used[j * N + i] = 1;
+      fans.push([c[0], c[1], ...loop.flat()]);
+    }
+  }
+  // The second level's fans. Along each edge a node is kept wherever the block beside it has one:
+  // every node beside fine cells, every K beside a coarse block, only the corners beside another
+  // second-level block (whose coarse blocks aren't drawn, so they don't count as coarse there).
+  const kind = (bi: number, bj: number) => (inSuper(bi, bj) ? 2 : isCoarse(bi, bj) ? 1 : 0);
+  for (let sj = 0; sj < B2; sj++) {
+    for (let si = 0; si < B2; si++) {
+      if (!isSuper(si, sj)) continue;
+      const i0 = si * KS, j0 = sj * KS;
+      const loop: [number, number][] = [];
+      // [start i, start j, di, dj, the neighbouring block row/column across this edge]
+      const edges: [number, number, number, number][] = [[i0, j0, 1, 0], [i0 + KS, j0, 0, 1], [i0 + KS, j0 + KS, -1, 0], [i0, j0 + KS, 0, -1]];
+      edges.forEach(([sI, sJ, di, dj], e) => {
+        // The neighbour's kind beside the segment from node k to node k + 1.
+        const beside = (k: number) => {
+          if (k < 0 || k >= KS) return 2;
+          const ci = Math.min(sI + di * k, sI + di * (k + 1)), cj = Math.min(sJ + dj * k, sJ + dj * (k + 1));
+          const bi = e === 1 ? si * S + S : e === 3 ? si * S - 1 : Math.floor(ci / K);
+          const bj = e === 0 ? sj * S - 1 : e === 2 ? sj * S + S : Math.floor(cj / K);
+          return kind(bi, bj);
+        };
+        const needs = (t: number, k: number) => t === 0 || (t === 1 && k % K === 0);
+        for (let k = 0; k < KS; k++) {
+          if (k > 0 && !needs(beside(k), k) && !needs(beside(k - 1), k)) continue;
+          loop.push([sI + di * k, sJ + dj * k]);
+        }
+      });
+      const c: [number, number] = [i0 + KS / 2, j0 + KS / 2];
       for (const [i, j] of [...loop, c]) used[j * N + i] = 1;
       fans.push([c[0], c[1], ...loop.flat()]);
     }

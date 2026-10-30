@@ -103,6 +103,11 @@ export interface BuildOptions {
   terrainLod: boolean;
   /** No level-of-detail blocks within this distance of the road's centreline, metres. */
   terrainLodNear: number;
+  /**
+   * How far the ground may sit off the true surface where it's drawn in bigger blocks more than
+   * 40 m from the road, metres (default 0.05; within 40 m it's 0.02). Larger thins a wide build further.
+   */
+  terrainLodFarTol?: number;
 }
 
 export const DEFAULT_OPTIONS: BuildOptions = {

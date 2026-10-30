@@ -54,4 +54,31 @@ describe("terrain level of detail", () => {
       expect(uz * vx - ux * vz).toBeGreaterThan(0);
     }
   });
+
+  // A bigger chunk, mostly far from the road, with a bump in the middle so the second level's blocks
+  // sit beside fine cells, first-level blocks and each other.
+  const big = { key: "t1_0", minX: 0, minY: 0, maxX: 192, maxY: 192 };
+  const bumpy = (x: number, y: number) => ({ h: 2 + 0.0005 * y + (Math.hypot(x - 120, y - 100) < 20 ? 0.3 * Math.sin(x) * Math.cos(y) : 0), dist: x });
+
+  it("second level: far flat ground in far fewer triangles still", () => {
+    const lod = buildTerrainChunk(big, bumpy, opts(true), true)!;
+    const fine = buildTerrainChunk(big, bumpy, opts(false), true)!;
+    // One level alone came to 32% here.
+    expect(lod.indices.length).toBeLessThan(fine.indices.length * 0.26);
+  });
+
+  it("second level: no cracks and faces up", () => {
+    const lod = buildTerrainChunk(big, bumpy, opts(true), true)!;
+    for (const [[x0, z0], [x1, z1]] of openEdges(lod)) {
+      const onBorder = (a: number, b: number) => (Math.abs(a - b) < 1e-3) && [0, 192].some((v) => Math.abs(Math.abs(a) - v) < 1e-3);
+      expect(onBorder(x0, x1) || onBorder(z0, z1)).toBe(true);
+    }
+    const p = lod.positions;
+    for (let t = 0; t < lod.indices.length; t += 3) {
+      const [a, b, c] = [lod.indices[t], lod.indices[t + 1], lod.indices[t + 2]];
+      const ux = p[b * 3] - p[a * 3], uz = p[b * 3 + 2] - p[a * 3 + 2];
+      const vx = p[c * 3] - p[a * 3], vz = p[c * 3 + 2] - p[a * 3 + 2];
+      expect(uz * vx - ux * vz).toBeGreaterThan(0);
+    }
+  });
 });
